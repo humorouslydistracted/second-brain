@@ -1,0 +1,45 @@
+# Second Brain — Python dependencies
+# Install with:  pip install -r requirements.txt
+# Python requirement: 3.10+
+# Current repo setup has been exercised on Python 3.14
+# `mcp` requires Python >= 3.10
+
+# ── Flask web app (primary testing surface) ────────────────
+flask
+mcp
+
+# ── Jupyter (to open and run the .ipynb files) ──────────────
+jupyter
+notebook
+ipykernel
+
+# ── Notebook 4 + 5: embeddings & vector search ──────────────
+sentence-transformers
+numpy
+
+# ── SQL safety gate (LLM-generated read-only SQL) ───────────
+sqlglot
+
+# ── Notebook 3: Qwen LLM fallback ───────────────────────────
+# Pick ONE backend. llama-cpp-python is the lighter option and
+# matches the Android target (llama.cpp + GGUF).
+llama-cpp-python
+
+# Alternative backend (uncomment if you can't get llama-cpp-python
+# to build on Windows; pulls in PyTorch, several GB):
+# transformers
+# accelerate
+# torch
+
+# ── Built-in, listed for clarity (no install needed) ────────
+# sqlite3   — Python standard library
+# re        — Python standard library
+# datetime  — Python standard library
+# json      — Python standard library
+
+# ── Local GPU env for the fine-tuned Qwen3 parser adapter ────
+# Do NOT install Unsloth / bitsandbytes / CUDA torch into THIS env.
+# Use the dedicated Python 3.10 env instead — see
+# `requirements_local_qwen3_finetuned_windows.txt` and the matching
+# install order documented at the top of that file. Inference helper:
+# `infer_finetuned_parser.py` (run from `.venv-qwen3-1p7b-1650`).

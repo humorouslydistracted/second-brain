@@ -1,0 +1,82 @@
+{% extends "base.html" %}
+{% block title %}Notes · Second Brain{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <div>
+    <h3 class="mb-1">Notes</h3>
+    <p class="text-muted mb-0">Real notes only. Pick one note to edit at a time.</p>
+  </div>
+</div>
+
+<div class="row g-4 notes-workspace">
+  <div class="col-lg-4">
+    <div class="card notes-panel h-100">
+      <div class="card-header">
+        <strong>All notes</strong>
+      </div>
+      {% if not notes %}
+        <div class="card-body">
+          <p class="text-muted mb-0">No notes yet.</p>
+        </div>
+      {% else %}
+        <div class="list-group list-group-flush notes-list">
+          {% for note in notes %}
+            <a
+              href="{{ url_for('notes_page', selected=note.id) }}"
+              class="list-group-item list-group-item-action notes-list-item{% if selected_note and selected_note.id == note.id %} active{% endif %}"
+              {% if selected_note and selected_note.id == note.id %}aria-current="page"{% endif %}
+            >
+              <div class="d-flex justify-content-between align-items-start gap-2 mb-1">
+                <strong>Note #{{ note.id }}</strong>
+                <small>{{ note.created_at[:16] if note.created_at else '' }}</small>
+              </div>
+              <div class="notes-preview">
+                {{ note.content | replace('\n', ' ') | truncate(120, True) }}
+              </div>
+            </a>
+          {% endfor %}
+        </div>
+      {% endif %}
+    </div>
+  </div>
+
+  <div class="col-lg-8">
+    <div class="card mb-4 notes-panel">
+      <div class="card-body">
+        <h5 class="card-title">New note</h5>
+        <form action="{{ url_for('notes_add') }}" method="post">
+          <textarea name="content" class="form-control mb-3" rows="6" placeholder="Write anything here..." required></textarea>
+          <button class="btn btn-primary" type="submit">Save note</button>
+        </form>
+      </div>
+    </div>
+
+    {% if selected_note %}
+      <div class="card notes-panel">
+        <div class="card-header d-flex justify-content-between align-items-center">
+          <div>
+            <strong>Editing note #{{ selected_note.id }}</strong>
+            <small class="text-muted ms-2">{{ selected_note.created_at }}</small>
+          </div>
+          <form action="{{ url_for('notes_delete', note_id=selected_note.id) }}" method="post" onsubmit="return confirm('Delete note #{{ selected_note.id }}?');">
+            <button class="btn btn-sm btn-outline-danger" type="submit">Delete</button>
+          </form>
+        </div>
+        <div class="card-body">
+          <form action="{{ url_for('notes_edit', note_id=selected_note.id) }}" method="post">
+            <textarea name="content" class="form-control mb-3" rows="{{ 14 if selected_note.content|length > 260 else 10 }}" required>{{ selected_note.content }}</textarea>
+            <button class="btn btn-outline-primary" type="submit">Save changes</button>
+          </form>
+        </div>
+      </div>
+    {% else %}
+      <div class="card notes-panel">
+        <div class="card-body">
+          <p class="text-muted mb-0">Create a note to start editing.</p>
+        </div>
+      </div>
+    {% endif %}
+  </div>
+</div>
+{% endblock %}

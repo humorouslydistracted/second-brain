@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+{% block title %}Second Brain{% endblock %}
+
+{% block content %}
+<div class="feed mb-5 pb-5">
+  {% if not feed %}
+    <div class="text-muted text-center py-5">
+      <p class="mb-1">No activity yet.</p>
+      <p class="small mb-0">Type a note or question below to get started.</p>
+      <p class="small mt-3 text-secondary">
+        Try: <code>petrol 500</code> · <code>gave Maddy 5k</code> · <code>jeevi 60.1</code> ·
+        <code>Maddy balance</code> · <code>Feb spending</code> · <code>Can I eat tomato</code>
+      </p>
+    </div>
+  {% else %}
+    {% for item in feed %}
+      <div class="activity mb-3">
+        <div class="d-flex justify-content-between align-items-baseline">
+          <div class="text-secondary small">› {{ item.input_text }}</div>
+          <div class="text-muted small">{{ item.created_at[-8:-3] }}</div>
+        </div>
+        <div class="response ps-3 border-start border-2">{{ item.response_text | replace('\n', '<br>') | safe }}</div>
+        {% if item.meta and item.meta.tier %}
+          <div class="parse-readback ps-3 small text-muted" style="font-size: 0.75rem; opacity: 0.7;">
+            [parsed:
+              {% if item.meta.rule %}{{ item.meta.rule }} · {% endif %}
+              {% if item.meta.confidence is not none and item.meta.confidence < 1 %}conf {{ "%.2f"|format(item.meta.confidence) }} · {% endif %}
+              {{ item.meta.tier }}{% if item.kind %} · {{ item.kind }}{% endif %}]
+          </div>
+        {% endif %}
+        {% if item.meta and item.meta.timing_summary %}
+          <div class="parse-readback ps-3 small text-muted" style="font-size: 0.75rem; opacity: 0.7;">
+            [time: {{ item.meta.timing_summary }}]
+          </div>
+        {% endif %}
+      </div>
+    {% endfor %}
+    <p class="text-muted small text-center mt-4">
+      Showing last {{ feed|length }} (max 10) ·
+      <a href="{{ url_for('activity') }}">View full activity log →</a>
+    </p>
+  {% endif %}
+</div>
+
+<!-- Bottom input bar (fixed) -->
+<form action="{{ url_for('note') }}" method="post" class="input-bar">
+  <div class="container">
+    <div class="input-group">
+      <input type="text" name="text" class="form-control form-control-lg"
+             placeholder="Type a note or question…"
+             autocomplete="off" autofocus required>
+      <button class="btn btn-primary" type="submit">Send</button>
+    </div>
+  </div>
+</form>
+{% endblock %}

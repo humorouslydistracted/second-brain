@@ -1,0 +1,71 @@
+{% extends "base.html" %}
+{% block title %}Dashboard · Second Brain{% endblock %}
+
+{% block content %}
+<h3 class="mb-4">Dashboard</h3>
+
+<div class="row g-3">
+  <div class="col-md-6">
+    <div class="card">
+      <div class="card-body">
+        <h6 class="card-subtitle text-muted mb-2">This month ({{ month }})</h6>
+        <div class="display-6">₹{{ '{:,.0f}'.format(spend) }}</div>
+        <div class="small text-muted">Total spend</div>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-md-6">
+    <div class="card">
+      <div class="card-body">
+        <h6 class="card-subtitle text-muted mb-2">Pending todos</h6>
+        <div class="display-6">{{ todos }}</div>
+        <a href="{{ url_for('todos_page') }}" class="small">View all →</a>
+      </div>
+    </div>
+  </div>
+
+  <div class="col-md-6">
+    <div class="card">
+      <div class="card-body">
+        <h6 class="card-subtitle text-muted mb-3">Ledger balances</h6>
+        {% if not balances %}
+          <p class="text-muted small mb-0">No ledger entries yet.</p>
+        {% else %}
+          <ul class="list-unstyled mb-0">
+            {% for b in balances %}
+              <li class="d-flex justify-content-between border-bottom py-1">
+                <span>{{ b.person.title() }}</span>
+                <span class="{% if b.balance > 0 %}text-success{% elif b.balance < 0 %}text-danger{% endif %}">
+                  {% if b.balance > 0 %}+{% endif %}₹{{ '{:,.0f}'.format(b.balance) }}
+                </span>
+              </li>
+            {% endfor %}
+          </ul>
+          <small class="text-muted">+ they owe you · − you owe them</small>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+  <div class="col-md-6">
+    <div class="card">
+      <div class="card-body">
+        <h6 class="card-subtitle text-muted mb-3">Latest weights</h6>
+        {% if not weights %}
+          <p class="text-muted small mb-0">No weight entries yet.</p>
+        {% else %}
+          <ul class="list-unstyled mb-0">
+            {% for w in weights %}
+              <li class="d-flex justify-content-between border-bottom py-1">
+                <span>{{ w.person.title() }}</span>
+                <span>{{ w.weight }}kg <small class="text-muted">{{ w.date[:10] }}</small></span>
+              </li>
+            {% endfor %}
+          </ul>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}

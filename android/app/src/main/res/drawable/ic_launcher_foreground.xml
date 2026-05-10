@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- Adaptive-icon foreground.
+         The 108x108 viewport is partially clipped by Android (only the
+         center 72x72 "safe zone" is guaranteed to render across all
+         masks). We center an "SB" lettermark in a soft circle so the
+         glyphs survive any mask shape (circle, squircle, rounded square).
+         Color is light-blue accent on a deep navy adaptive background.
+    -->
+    <group android:translateX="18" android:translateY="18">
+        <path
+            android:pathData="M36,0 a36,36 0 1,0 0.001,0 z"
+            android:fillColor="#26314F"/>
+        <!-- "S" -->
+        <path
+            android:pathData="M22,21 q5,-5 12,-5 q8,0 12,5 l-3,3 q-3,-3 -9,-3 q-5,0 -8,3 q-3,3 0,6 q3,3 11,4 q9,2 12,5 q4,4 1,9 q-3,5 -13,5 q-9,0 -14,-5 l3,-3 q4,4 11,4 q6,0 9,-3 q3,-3 0,-6 q-3,-3 -10,-4 q-9,-1 -12,-4 q-3,-3 -3,-6 q0,-3 1,-5 z"
+            android:fillColor="#7BB3FF"/>
+        <!-- "B" -->
+        <path
+            android:pathData="M40,16 h12 q7,0 10,3 q3,3 3,7 q0,4 -3,6 q-1,1 -2,2 q3,1 5,4 q3,3 3,7 q0,5 -3,8 q-3,3 -10,3 h-15 z M44,20 v14 h8 q5,0 7,-2 q2,-2 2,-5 q0,-3 -2,-5 q-2,-2 -7,-2 z M44,38 v14 h11 q5,0 7,-2 q2,-2 2,-5 q0,-3 -2,-5 q-2,-2 -7,-2 z"
+            android:fillColor="#7BB3FF"/>
+    </group>
+</vector>

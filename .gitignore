@@ -1,0 +1,106 @@
+# ---------------------------------------------------------------------------
+# Python virtual environments and caches
+# ---------------------------------------------------------------------------
+.venv/
+.venv-*/
+venv/
+env/
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# ---------------------------------------------------------------------------
+# Android / Gradle build output
+# ---------------------------------------------------------------------------
+android/build/
+android/app/build/
+android/.gradle/
+android/.idea/
+android/.kotlin/
+android/.cxx/
+android/local.properties
+android/captures/
+*.iml
+
+# ---------------------------------------------------------------------------
+# IDE / OS junk
+# ---------------------------------------------------------------------------
+.vscode/
+.idea/
+.claude/
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ---------------------------------------------------------------------------
+# Scratch, logs, dumps
+# ---------------------------------------------------------------------------
+.tmp/
+artifacts/
+*.log
+logs.txt
+results.txt
+preset_run.log
+preset_run_compact.txt
+combined_summary.json
+qna.md
+this
+second_brain_mcp_server.log
+
+# ---------------------------------------------------------------------------
+# Local SQLite databases (regenerated from seed.sql or notebook 1)
+# ---------------------------------------------------------------------------
+*.db
+*.sqlite
+*.sqlite3
+
+# ---------------------------------------------------------------------------
+# Model files and large binaries — ship via GitHub Releases instead
+# ---------------------------------------------------------------------------
+models/
+*.gguf
+*.safetensors
+*.onnx
+*.onnx.data
+*.bin
+*.pkl
+*.pt
+*.pth
+
+# ---------------------------------------------------------------------------
+# Fine-tune snapshots and adapter outputs
+# ---------------------------------------------------------------------------
+lora_adapter/
+lora_adapter_*/
+unsloth_qwen3_parser_run*/
+unsloth_compiled_cache/
+finetuned-*/
+finetuned-*.zip
+minilm_export/
+
+# ---------------------------------------------------------------------------
+# Synthetic + held-out datasets (regenerate via the generator scripts)
+# ---------------------------------------------------------------------------
+synthetic_finetune_dataset_*/
+sample_finetune_dataset_*/
+eval_finetune_dataset_*/
+synthetic_dataset_assets_copy.py
+
+# ---------------------------------------------------------------------------
+# APK / AAB — ship via GitHub Releases instead
+# ---------------------------------------------------------------------------
+*.apk
+*.aab
+releases/
+
+# ---------------------------------------------------------------------------
+# Secrets
+# ---------------------------------------------------------------------------
+.env
+.env.*
+*.pem
+*.key

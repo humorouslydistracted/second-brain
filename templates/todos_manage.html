@@ -1,0 +1,63 @@
+{% extends "base.html" %}
+{% block title %}Todos · Second Brain{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <div>
+    <h3 class="mb-1">Todos</h3>
+    <p class="text-muted mb-0">Add one todo or paste multiple lines to create several at once.</p>
+  </div>
+  <form action="{{ url_for('todos_clear') }}" method="post"
+        onsubmit="return confirm('Clear all todos?');">
+    <button class="btn btn-outline-danger" type="submit" {% if not rows %}disabled{% endif %}>Clear all</button>
+  </form>
+</div>
+
+<div class="card mb-4">
+  <div class="card-body">
+    <form action="{{ url_for('todos_add') }}" method="post">
+      <textarea name="content" class="form-control mb-3" rows="4" placeholder="buy milk&#10;call Amit" required></textarea>
+      <button class="btn btn-primary" type="submit">Add todo</button>
+    </form>
+  </div>
+</div>
+
+{% if not rows %}
+  <p class="text-muted">No todos yet.</p>
+{% else %}
+  <div class="table-responsive">
+    <table class="table table-sm align-middle">
+      <thead>
+        <tr>
+          <th>ID</th>
+          <th>Content</th>
+          <th>Status</th>
+          <th>Created</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in rows %}
+          <tr {% if row.status == 'done' %}class="text-muted text-decoration-line-through"{% endif %}>
+            <td>{{ row.id }}</td>
+            <td>{{ row.content }}</td>
+            <td>{{ row.status }}</td>
+            <td>{{ row.created_at }}</td>
+            <td class="text-end">
+              <form action="{{ url_for('todo_toggle', tid=row.id) }}" method="post" class="d-inline">
+                <button class="btn btn-sm btn-outline-secondary" type="submit">
+                  {% if row.status == 'pending' %}Mark done{% else %}Reopen{% endif %}
+                </button>
+              </form>
+              <form action="{{ url_for('todo_delete', tid=row.id) }}" method="post" class="d-inline"
+                    onsubmit="return confirm('Delete todo #{{ row.id }}?');">
+                <button class="btn btn-sm btn-outline-danger" type="submit">Delete</button>
+              </form>
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+{% endif %}
+{% endblock %}

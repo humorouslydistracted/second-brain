@@ -1,0 +1,96 @@
+/* Bottom input bar — fixed full-width */
+.input-bar {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  background: white;
+  border-top: 1px solid #dee2e6;
+  padding: 0.75rem 0;
+  z-index: 1000;
+}
+
+.app-topbar {
+  top: 0;
+  z-index: 1030;
+  backdrop-filter: blur(10px);
+  background: rgba(248, 249, 250, 0.94) !important;
+}
+
+.drawer-nav .list-group-item {
+  border: 0;
+  border-left: 4px solid transparent;
+  font-weight: 500;
+  padding: 0.9rem 1.1rem;
+}
+
+.drawer-nav .list-group-item:hover,
+.drawer-nav .list-group-item:focus {
+  background: #f3f6fb;
+}
+
+.drawer-nav .list-group-item.active {
+  background: #e8f0ff;
+  border-left-color: #0d6efd;
+  color: #0a3d91;
+}
+
+.notes-panel {
+  border: 1px solid #e4e7ec;
+}
+
+.notes-list {
+  max-height: 70vh;
+  overflow-y: auto;
+}
+
+.notes-list-item {
+  border: 0;
+  border-left: 4px solid transparent;
+  padding: 0.95rem 1rem;
+}
+
+.notes-list-item small {
+  color: #6c757d;
+  white-space: nowrap;
+}
+
+.notes-list-item:hover,
+.notes-list-item:focus {
+  background: #f8fafd;
+}
+
+.notes-list-item.active {
+  background: #eef4ff;
+  border-left-color: #0d6efd;
+  color: #0a3d91;
+}
+
+.notes-list-item.active small {
+  color: #5272a5;
+}
+
+.notes-preview {
+  color: #5b6470;
+  font-size: 0.93rem;
+  line-height: 1.45;
+}
+
+.notes-list-item.active .notes-preview {
+  color: #244d8f;
+}
+
+/* Reserve room above the input bar so feed isn't hidden under it */
+main {
+  padding-bottom: 6rem;
+}
+
+.feed .response {
+  white-space: pre-wrap;
+  font-size: 0.95rem;
+}
+
+.feed .activity:hover {
+  background: #fafafa;
+  border-radius: 4px;
+}

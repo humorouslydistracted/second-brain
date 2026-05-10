@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{% block title %}Second Brain{% endblock %}</title>
+  <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+  <link href="{{ url_for('static', filename='style.css') }}" rel="stylesheet">
+</head>
+<body>
+{% set current_endpoint = request.endpoint or '' %}
+
+<!-- Top bar -->
+<nav class="navbar navbar-light bg-light border-bottom px-3 app-topbar sticky-top">
+  <button class="btn btn-link p-0 me-3" type="button" data-bs-toggle="offcanvas" data-bs-target="#drawer" aria-label="Menu">
+    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" fill="currentColor" viewBox="0 0 16 16" aria-hidden="true">
+      <path fill-rule="evenodd" d="M2.5 12a.5.5 0 0 1 .5-.5h10a.5.5 0 0 1 0 1H3a.5.5 0 0 1-.5-.5m0-4a.5.5 0 0 1 .5-.5h10a.5.5 0 0 1 0 1H3a.5.5 0 0 1-.5-.5m0-4a.5.5 0 0 1 .5-.5h10a.5.5 0 0 1 0 1H3a.5.5 0 0 1-.5-.5"/>
+    </svg>
+  </button>
+  <span class="navbar-brand mb-0 h5">
+    <a href="{{ url_for('index') }}" class="text-decoration-none text-dark">Second Brain</a>
+  </span>
+</nav>
+
+<!-- Hamburger drawer -->
+<div class="offcanvas offcanvas-start" tabindex="-1" id="drawer" aria-labelledby="drawer-title">
+  <div class="offcanvas-header">
+    <h5 class="offcanvas-title" id="drawer-title">Menu</h5>
+    <button type="button" class="btn-close" data-bs-dismiss="offcanvas" aria-label="Close"></button>
+  </div>
+  <div class="offcanvas-body p-0">
+    <div class="list-group list-group-flush drawer-nav">
+      <a href="{{ url_for('index') }}" class="list-group-item list-group-item-action{% if current_endpoint == 'index' %} active{% endif %}" {% if current_endpoint == 'index' %}aria-current="page"{% endif %}>Home</a>
+      <a href="{{ url_for('dashboard') }}" class="list-group-item list-group-item-action{% if current_endpoint == 'dashboard' %} active{% endif %}" {% if current_endpoint == 'dashboard' %}aria-current="page"{% endif %}>Dashboard</a>
+      <a href="{{ url_for('activity') }}" class="list-group-item list-group-item-action{% if current_endpoint == 'activity' %} active{% endif %}" {% if current_endpoint == 'activity' %}aria-current="page"{% endif %}>Activity log</a>
+      <a href="{{ url_for('notes_page') }}" class="list-group-item list-group-item-action{% if current_endpoint in ['notes_page', 'notes_add', 'notes_edit', 'notes_delete'] %} active{% endif %}" {% if current_endpoint in ['notes_page', 'notes_add', 'notes_edit', 'notes_delete'] %}aria-current="page"{% endif %}>Notes</a>
+      <a href="{{ url_for('people') }}" class="list-group-item list-group-item-action{% if current_endpoint in ['people', 'people_add', 'people_rename', 'people_delete'] %} active{% endif %}" {% if current_endpoint in ['people', 'people_add', 'people_rename', 'people_delete'] %}aria-current="page"{% endif %}>People</a>
+      <a href="{{ url_for('expenses_page') }}" class="list-group-item list-group-item-action{% if current_endpoint in ['expenses_page', 'expenses_add', 'expenses_delete', 'expenses_clear'] %} active{% endif %}" {% if current_endpoint in ['expenses_page', 'expenses_add', 'expenses_delete', 'expenses_clear'] %}aria-current="page"{% endif %}>Expenses</a>
+      <a href="{{ url_for('ledger_page') }}" class="list-group-item list-group-item-action{% if current_endpoint in ['ledger_page', 'ledger_add', 'ledger_delete', 'ledger_clear'] %} active{% endif %}" {% if current_endpoint in ['ledger_page', 'ledger_add', 'ledger_delete', 'ledger_clear'] %}aria-current="page"{% endif %}>Ledger</a>
+      <a href="{{ url_for('weights_page') }}" class="list-group-item list-group-item-action{% if current_endpoint in ['weights_page', 'weights_add', 'weights_delete', 'weights_clear'] %} active{% endif %}" {% if current_endpoint in ['weights_page', 'weights_add', 'weights_delete', 'weights_clear'] %}aria-current="page"{% endif %}>Weights</a>
+      <a href="{{ url_for('todos_page') }}" class="list-group-item list-group-item-action{% if current_endpoint in ['todos_page', 'todos_add', 'todo_toggle', 'todo_delete', 'todos_clear'] %} active{% endif %}" {% if current_endpoint in ['todos_page', 'todos_add', 'todo_toggle', 'todo_delete', 'todos_clear'] %}aria-current="page"{% endif %}>Todos</a>
+      <a href="{{ url_for('settings_page') }}" class="list-group-item list-group-item-action{% if current_endpoint == 'settings_page' %} active{% endif %}" {% if current_endpoint == 'settings_page' %}aria-current="page"{% endif %}>Settings</a>
+    </div>
+  </div>
+</div>
+
+<!-- Flash messages -->
+<div class="container mt-2">
+  {% with messages = get_flashed_messages(with_categories=true) %}
+    {% for cat, msg in messages %}
+      <div class="alert alert-{{ 'success' if cat == 'success' else 'warning' if cat == 'warning' else 'info' }} py-2 mb-2">{{ msg }}</div>
+    {% endfor %}
+  {% endwith %}
+</div>
+
+<main class="container py-3">
+  {% block content %}{% endblock %}
+</main>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>

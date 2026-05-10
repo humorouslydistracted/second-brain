@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% block title %}{{ title }} · Second Brain{% endblock %}
+
+{% block content %}
+<h3 class="mb-4">{{ title }}</h3>
+
+{% if not rows %}
+  <p class="text-muted">No entries yet.</p>
+{% else %}
+  <div class="table-responsive">
+    <table class="table table-sm table-hover">
+      <thead>
+        <tr>
+          {% for c in columns %}<th>{{ c }}</th>{% endfor %}
+          {% if title == 'Todos' %}<th></th>{% endif %}
+        </tr>
+      </thead>
+      <tbody>
+        {% for r in rows %}
+          <tr {% if title == 'Todos' and r.status == 'done' %}class="text-muted text-decoration-line-through"{% endif %}>
+            {% for c in columns %}<td>{{ r[c] }}</td>{% endfor %}
+            {% if title == 'Todos' %}
+              <td>
+                <form action="{{ url_for('todo_toggle', tid=r.id) }}" method="post" class="d-inline">
+                  <button class="btn btn-sm btn-outline-secondary">
+                    {% if r.status == 'pending' %}Mark done{% else %}Reopen{% endif %}
+                  </button>
+                </form>
+              </td>
+            {% endif %}
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <p class="text-muted small">Showing latest {{ rows|length }} (max 100). Domain-specific filters coming later.</p>
+{% endif %}
+{% endblock %}

@@ -1,0 +1,91 @@
+{% extends "base.html" %}
+{% block title %}Ledger · Second Brain{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <div>
+    <h3 class="mb-1">Ledger</h3>
+    <p class="text-muted mb-0">Track who owes whom without using the Home input.</p>
+  </div>
+  <form action="{{ url_for('ledger_clear') }}" method="post"
+        onsubmit="return confirm('Clear all ledger entries?');">
+    <button class="btn btn-outline-danger" type="submit" {% if not rows %}disabled{% endif %}>Clear all</button>
+  </form>
+</div>
+
+<div class="card mb-4">
+  <div class="card-body">
+    <datalist id="ledger-people">
+      {% for person in persons %}
+        <option value="{{ person.name }}"></option>
+      {% endfor %}
+    </datalist>
+    <form action="{{ url_for('ledger_add') }}" method="post" class="row g-3">
+      <div class="col-md-3">
+        <label class="form-label">Person</label>
+        <input type="text" name="person" class="form-control" list="ledger-people" required>
+      </div>
+      <div class="col-md-2">
+        <label class="form-label">Amount</label>
+        <input type="number" name="amount" class="form-control" step="0.01" min="0.01" required>
+      </div>
+      <div class="col-md-2">
+        <label class="form-label">Direction</label>
+        <select name="direction" class="form-select" required>
+          <option value="gave">I gave</option>
+          <option value="received">I received</option>
+        </select>
+      </div>
+      <div class="col-md-2">
+        <label class="form-label">Date</label>
+        <input type="date" name="date" class="form-control" value="{{ today_iso }}">
+      </div>
+      <div class="col-md-2">
+        <label class="form-label">Note</label>
+        <input type="text" name="note" class="form-control" placeholder="optional">
+      </div>
+      <div class="col-md-1 d-flex align-items-end">
+        <button class="btn btn-primary w-100" type="submit">Add</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+{% if not rows %}
+  <p class="text-muted">No ledger entries yet.</p>
+{% else %}
+  <div class="table-responsive">
+    <table class="table table-sm align-middle">
+      <thead>
+        <tr>
+          <th>ID</th>
+          <th>Person</th>
+          <th>Amount</th>
+          <th>Direction</th>
+          <th>Date</th>
+          <th>Note</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for row in rows %}
+          <tr>
+            <td>{{ row.id }}</td>
+            <td>{{ row.person }}</td>
+            <td>₹{{ '{:,.0f}'.format(row.amount) }}</td>
+            <td>{{ row.direction }}</td>
+            <td>{{ row.date }}</td>
+            <td>{{ row.note or '' }}</td>
+            <td class="text-end">
+              <form action="{{ url_for('ledger_delete', ledger_id=row.id) }}" method="post" class="d-inline"
+                    onsubmit="return confirm('Delete ledger entry #{{ row.id }}?');">
+                <button class="btn btn-sm btn-outline-danger" type="submit">Delete</button>
+              </form>
+            </td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+{% endif %}
+{% endblock %}
