@@ -104,3 +104,7 @@ releases/
 .env.*
 *.pem
 *.key
+PAT
+PAT.txt
+*.token
+_pat.tmp
