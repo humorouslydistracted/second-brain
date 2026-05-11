@@ -340,6 +340,7 @@ To regenerate the v3 held-out eval set: `python generate_eval_dataset_v3.py` (wr
 5. **Flip the runtime `Today:` injection on for the new adapter.** `SECOND_BRAIN_FINETUNED_PARSER_TODAY_INJECTION=1`. Confirm `status()` reports `today_injection_enabled: true`.
 6. **Dogfood the integrated parser path** with the v2 adapter. Run the Flask app from `.venv-qwen3-1p7b-1650`, turn on `SECOND_BRAIN_FINETUNED_PARSER_ENABLED=1`, collect real failures from tagged inputs.
 7. **Latency / deployment.** Once parser behavior is stable, move to GGUF / llama.cpp / Android-oriented latency work.
+8. **Optional 0.6B A/B test.** Train the smaller model via `kaggle_finetune_qwen3_0p6b.py` (or the Colab `.py` / Kaggle `.ipynb` variants), convert via `colab_convert_to_gguf_qwen3_0p6b.ipynb`, push the resulting `qwen3-0.6b-parser-q4_k_m.gguf` into the phone's models dir alongside the 1.7B file. Settings now lists both — switch via radio rows. Compare reliability + tok/s using existing `Activity log → Copy logs` per-request stats (`prefill_us`, `decode_us_total`, `tokens_out`). Expected: ~3× faster decode (~25-30 tok/s vs ~10 tok/s on Pixel 7); reliability drop on multi-record outputs and Tanglish.
 
 Optional follow-ups deferred to v3 plan (only if real failures show them):
 - Trim ledger literal-"ledger" word usage further (currently 38%, soft target was ≤30%).
@@ -371,6 +372,8 @@ Optional follow-ups deferred to v3 plan (only if real failures show them):
 | Dataset generators (v1) | `generate_large_schema_frozen_dataset.py`, `generate_eval_dataset_v2.py`, `synthetic_dataset_assets.py` (asset file is shared between v1 and v2) |
 | Dataset generator (v2) | `generate_large_schema_frozen_dataset_v2.py` (writes `synthetic_finetune_dataset_v4_v2_schema/`); `generate_eval_dataset_v3.py` for the v2-schema eval set |
 | Local 0.6B path (laptop) | `local_finetune_qwen3_0p6b_gtx1650.py`, `local_evaluate_qwen3_0p6b_gtx1650.py`, `create_local_qwen3_0p6b_env.ps1`, `requirements_local_qwen3_0p6b_windows.txt` |
+| 0.6B fine-tune scaffolding (Colab/Kaggle, A/B vs 1.7B) | `colab_finetune_qwen3_0p6b.py` (LORA_R=8, output `unsloth_qwen3_0p6b_parser_run/`), `colab_convert_to_gguf_qwen3_0p6b.ipynb` (BASE_MODEL_HF=`Qwen/Qwen3-0.6B`, output `qwen3-0.6b-parser-q4_k_m.gguf` ~400 MB), `kaggle_finetune_qwen3_0p6b.ipynb` + `kaggle_finetune_qwen3_0p6b.py` (the .py mirror also pins `CUDA_VISIBLE_DEVICES=0` before `import torch` so Kaggle T4 x2 only exposes one GPU). All four carry the 2026-05-09 trainer fixes (`train_on_responses_only`, `packing=False`, `MAX_SEQ_LENGTH=1536`). The 1.7B pipeline is untouched; both GGUFs can coexist on phone. |
+| Android multi-model picker | `android/app/src/main/java/com/secondbrain/app/data/ModelRegistry.kt` (auto-discovers `qwen3-<size>-parser-q4_k_m.gguf` in the app's models dir, persists user's choice to `runtime_state` key `selected_model`). `AppStartup.kt` + `SettingsScreen.kt` consume it — Settings gets one radio row per discovered GGUF; tap to switch (force-unloads current, loads selected). |
 | Stress harnesses | `test_independent_500.py`, `test_replay_matrix*.py`, `test_note_corpus_stress_200.py` |
 | Regression suites | `test_orchestrator_tier0.py`, `test_routing_memory.py`, `test_logs_regression.py`, `test_activity_log_regression.py`, `test_flask_crud.py`, `test_sql_safety.py` |
 

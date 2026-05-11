@@ -161,6 +161,7 @@ fun TodosScreen(vm: TodosViewModel = viewModel()) {
                 }
             },
             modifier = Modifier.fillMaxSize(),
+            highlightRoute = "todos",
         )
     }
 }

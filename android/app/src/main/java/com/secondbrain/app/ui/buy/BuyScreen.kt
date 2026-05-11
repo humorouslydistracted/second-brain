@@ -195,6 +195,7 @@ fun BuyScreen(vm: BuyViewModel = viewModel()) {
                 }
             },
             modifier = Modifier.fillMaxSize(),
+            highlightRoute = "buy",
         )
     }
 }

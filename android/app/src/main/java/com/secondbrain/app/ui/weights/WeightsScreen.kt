@@ -1,8 +1,10 @@
 package com.secondbrain.app.ui.weights
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
@@ -21,6 +23,9 @@ import com.secondbrain.app.data.WeightRow
 import com.secondbrain.app.data.WeightsDao
 import com.secondbrain.app.orchestrator.ActivityLogDao
 import com.secondbrain.app.ui.common.SectionHeader
+import com.secondbrain.app.ui.common.backgroundFor
+import com.secondbrain.app.ui.common.consumeOnLaunch
+import com.secondbrain.app.ui.common.rememberHighlightState
 import com.secondbrain.app.ui.common.renderTable
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -117,6 +122,13 @@ class WeightsViewModel : ViewModel() {
 @Composable
 fun WeightsScreen(vm: WeightsViewModel = viewModel()) {
     val state by vm.s.collectAsState()
+    val listState = rememberLazyListState()
+    val highlight = rememberHighlightState()
+    highlight.consumeOnLaunch(
+        route = "weights",
+        listState = listState,
+        scrollIndex = { id -> state.rows.indexOfFirst { it.id == id } },
+    )
     Column(Modifier.fillMaxSize().padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
 
         SectionHeader(
@@ -160,10 +172,11 @@ fun WeightsScreen(vm: WeightsViewModel = viewModel()) {
         ) { Icon(Icons.Filled.Add, contentDescription = null); Spacer(Modifier.width(4.dp)); Text("Add") }
 
         HorizontalDivider()
-        LazyColumn(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        LazyColumn(state = listState, verticalArrangement = Arrangement.spacedBy(4.dp)) {
             items(state.rows, key = { it.id }) { r ->
+                val rowBg = highlight.backgroundFor(r.id)
                 if (state.editingId == r.id) {
-                    Column(Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                    Column(Modifier.fillMaxWidth().background(rowBg).padding(vertical = 4.dp),
                         verticalArrangement = Arrangement.spacedBy(4.dp)) {
                         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                             OutlinedTextField(value = state.editPerson, onValueChange = vm::setEditPerson,
@@ -183,7 +196,7 @@ fun WeightsScreen(vm: WeightsViewModel = viewModel()) {
                         }
                     }
                 } else {
-                    Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Row(Modifier.fillMaxWidth().background(rowBg).padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                         Text(r.date, style = MaterialTheme.typography.bodySmall, modifier = Modifier.width(96.dp))
                         Column(Modifier.weight(1f)) {
                             Text("${r.person.replaceFirstChar { it.uppercase() }} - ${r.weight}kg",

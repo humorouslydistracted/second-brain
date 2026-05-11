@@ -588,6 +588,35 @@ are tracked as Phase 3f below.
 `orchestrator/Tags.kt` (enum reorder), `orchestrator/RequestLog.kt`
 (`clear()` now also wipes event_log).
 
+### 7c. Phase 3g — Activity-feed deep-linking + ledger-edit fix + multi-model picker (2026-05-11)
+
+Three small surfaces, one APK build. All compile clean (`BUILD
+SUCCESSFUL`).
+
+| Item | Status | Note |
+|---|---|---|
+| Home `Recent` activity rows clickable | ✅ done | Each non-deletion entry navigates to its domain screen on tap. Resolver chain in `ui/home/HomeScreen.kt::resolveTarget`: (1) orchestrator metadata `target_route` + `target_row_id` (set on every Home submission post this build — also flashes the affected row on the destination via `HighlightBus`), (2) input-text tag prefix (`expense:` / `buy:` / `todo:` / `weight:` / `ledger:` / `note:` — covers historical Home rows logged with `kind="write"` / `"query"`), (3) `kind` column (covers all page-CRUD adds/edits/toggles). Deletion entries explicitly non-clickable: case-sensitive `Deleted ` / `Cleared ` prefix on `inputText`. `kind="settings"` / `"settings_error"` filtered. Old `ask:` queries pre-this-build remain non-clickable (domain not recoverable from text). |
+| Highlight + scroll on destination | ✅ done | New `ui/common/HighlightBus.kt` (single-shot `set(route, id)` / `consume(route)` registry) + `ui/common/Highlight.kt` (`HighlightState` + `consumeOnLaunch` + `backgroundFor` — tertiary-tinted background, 250 ms fade-in / 600 ms fade-out, scrolls LazyColumn to the row). Wired into `WeightsScreen`, `LedgerScreen`, `ExpensesScreen` (handles its date-grouped header layout), `BuyScreen` + `TodosScreen` via a new `highlightRoute` parameter on the shared `DateGroupedChecklist`, `NotesScreen`. |
+| Orchestrator records target metadata | ✅ done | `Orchestrator.handle` now captures `targetRoute` + `targetRowId` per request and writes them into `activity_log.metadata_json`. Write writes → first row id from `undo.rowDeletes` filtered by lane→table mapping, query → `domainToRoute(payload.domain)` no row id, note bypass → `("notes", noteId)`. New helpers `laneToRoute` / `laneToTable` / `domainToRoute`. |
+| Ledger edit form missing direction toggle | ✅ done | Edit form now has `I lent` / `I owe` `FilterChip` row matching the add form. `LedgerViewModel.S` gains `editDirection`; `startEdit` seeds from `row.direction`; `saveEdit` persists via `LedgerDao.update(...)` whose signature was bumped to take `direction: String`. Previously editing an entry left direction frozen at whatever it was originally. |
+| Multi-model picker (1.7B + 0.6B coexist) | ✅ done | New `data/ModelRegistry.kt` auto-discovers `qwen3-<size>-parser-q4_k_m.gguf` via regex; persists user's pick to `runtime_state` (key `selected_model`, JSON `{"filename": "..."}`). `AppStartup.kt` switched from hardcoded filename to `ModelRegistry.resolveSelected(...)`. `SettingsViewModel` gains `availableModels` + `selectedModel` state + `refreshAvailableModels(...)` + `selectModel(...)` (`forceUnload()` → load new → re-scan). `SettingsScreen` adds an "Available parser models" section with one `RadioButton` per discovered GGUF; tap a non-active row to switch in-place. `MODEL_FILENAME` constant renamed to `DEFAULT_MODEL_FILENAME` and demoted to empty-state hint. Import-help text updated. See section 8b for the A/B workflow. |
+| 30-row recent feed cap | ✅ already there | `HomeViewModel.refreshRecent` already used `ActivityLogDao.list(db, limit = 30)`; verified, no change needed. |
+
+**Files added in 3g:** `data/ModelRegistry.kt`,
+`ui/common/HighlightBus.kt`, `ui/common/Highlight.kt`.
+
+**Files modified in 3g:** `orchestrator/Orchestrator.kt` (target
+metadata capture + lane/domain → route helpers), `data/Daos.kt`
+(`LedgerDao.update` signature), `AppStartup.kt` (registry-driven model
+load), `ui/home/HomeScreen.kt` (`HistoryCard` clickability resolver),
+`ui/ledger/LedgerScreen.kt` (direction toggle in edit form +
+highlight), `ui/weights/WeightsScreen.kt`,
+`ui/expenses/ExpensesScreen.kt`, `ui/notes/NotesScreen.kt` (highlight
+hook-up), `ui/common/DateGroupedChecklist.kt` (`highlightRoute` param,
+consumed from BuyScreen + TodosScreen), `ui/buy/BuyScreen.kt`,
+`ui/todos/TodosScreen.kt`, `ui/settings/SettingsScreen.kt` (multi-model
+picker UI + `selectModel` flow).
+
 ### 8. When you re-finetune the parser
 
 Quick workflow checklist (so you don't have to re-derive each time):
@@ -614,6 +643,33 @@ Quick workflow checklist (so you don't have to re-derive each time):
 
 If you don't change the dataset between fine-tunes, no APK rebuild is
 needed — the GGUF swap is enough.
+
+### 8b. A/B testing 1.7B vs 0.6B side-by-side (added 2026-05-11)
+
+Both GGUFs can coexist on the phone. The app discovers anything matching
+`qwen3-<size>-parser-q4_k_m.gguf` under `models/` and lets you switch
+without re-pushing files.
+
+Workflow:
+
+1. Train + convert the 0.6B adapter using the dedicated scaffolding
+   files (see `current_state.md` → File pointers → "0.6B fine-tune
+   scaffolding"). Output filename is `qwen3-0.6b-parser-q4_k_m.gguf`
+   (~400 MB vs ~1.1 GB for 1.7B).
+2. Push the 0.6B GGUF into the **same** `models/` folder as the 1.7B
+   one — don't replace, copy alongside.
+3. Open the app → ☰ → Settings. Under **Available parser models** you'll
+   see one radio row per discovered GGUF.
+4. Tap a non-active row → current model `forceUnload()`s, the chosen one
+   loads, choice persists in `runtime_state` (key `selected_model`) and
+   survives app/process restarts.
+5. Compare: run the same prompt against each model, then `Activity log
+   → Copy logs`. Each request block has `prefill_us`, `decode_us_total`,
+   `tokens_out` — compute tok/s as `tokens_out * 1e6 / decode_us_total`.
+
+Implementation: `data/ModelRegistry.kt` (regex discovery + persistence),
+`AppStartup.kt` (auto-load whichever `resolveSelected(...)` returns),
+`ui/settings/SettingsScreen.kt` (radio rows + `selectModel(...)`).
 
 ---
 

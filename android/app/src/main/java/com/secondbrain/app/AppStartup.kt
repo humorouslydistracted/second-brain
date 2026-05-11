@@ -1,6 +1,8 @@
 package com.secondbrain.app
 
 import android.content.Context
+import com.secondbrain.app.data.DatabaseHolder
+import com.secondbrain.app.data.ModelRegistry
 import com.secondbrain.app.embedding.MiniLmEncoder
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -33,8 +35,6 @@ object AppStartup {
 
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
 
-    private const val GGUF_FILENAME = "qwen3-1.7b-parser-q4_k_m.gguf"
-
     fun warmOnce(context: Context) {
         if (!warmStarted.compareAndSet(false, true)) return
         val modelDir = File(context.getExternalFilesDir("models")?.absolutePath ?: return)
@@ -43,13 +43,15 @@ object AppStartup {
     }
 
     private suspend fun autoLoadLlm(modelDir: File) {
-        val gguf = File(modelDir, GGUF_FILENAME)
-        if (!gguf.exists()) {
+        // Discover GGUFs and pick the user's selection (or first found).
+        // Supports running 1.7B and 0.6B side-by-side for A/B comparison.
+        val gguf = ModelRegistry.resolveSelected(DatabaseHolder.get(), modelDir)
+        if (gguf == null) {
             AppStatusBus.emit("Model file not found — open Settings to import.")
             return
         }
         if (LlamaCpp.isLoaded()) return
-        AppStatusBus.emit("Loading model…")
+        AppStatusBus.emit("Loading ${gguf.name}…")
         val started = System.nanoTime()
         runCatching { LlamaCpp.loadModel(gguf, preferGpu = true, nCtx = 1024) }
             .onSuccess {

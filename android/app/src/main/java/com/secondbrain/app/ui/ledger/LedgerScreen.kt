@@ -1,8 +1,10 @@
 package com.secondbrain.app.ui.ledger
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
@@ -22,6 +24,9 @@ import com.secondbrain.app.data.LedgerDao
 import com.secondbrain.app.data.LedgerRow
 import com.secondbrain.app.orchestrator.ActivityLogDao
 import com.secondbrain.app.ui.common.SectionHeader
+import com.secondbrain.app.ui.common.backgroundFor
+import com.secondbrain.app.ui.common.consumeOnLaunch
+import com.secondbrain.app.ui.common.rememberHighlightState
 import com.secondbrain.app.ui.common.renderTable
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -43,6 +48,7 @@ class LedgerViewModel : ViewModel() {
         val editingId: Long? = null,
         val editPerson: String = "",
         val editAmount: String = "",
+        val editDirection: String = "gave",
         val editDate: String = "",
         val editNote: String = "",
     )
@@ -76,11 +82,13 @@ class LedgerViewModel : ViewModel() {
 
     fun startEdit(row: LedgerRow) = _s.update {
         it.copy(editingId = row.id, editPerson = row.person, editAmount = row.amount.toString(),
+            editDirection = row.direction,
             editDate = row.date ?: row.createdAt.take(10), editNote = row.note ?: "")
     }
     fun cancelEdit() = _s.update { it.copy(editingId = null) }
     fun setEditPerson(v: String) = _s.update { it.copy(editPerson = v) }
     fun setEditAmount(v: String) = _s.update { it.copy(editAmount = v) }
+    fun setEditDirection(v: String) = _s.update { it.copy(editDirection = v) }
     fun setEditDate(v: String) = _s.update { it.copy(editDate = v) }
     fun setEditNote(v: String) = _s.update { it.copy(editNote = v) }
 
@@ -88,14 +96,17 @@ class LedgerViewModel : ViewModel() {
         val id = _s.value.editingId ?: return@launch
         val p = _s.value.editPerson.trim().ifBlank { return@launch }
         val a = _s.value.editAmount.toDoubleOrNull() ?: return@launch
+        val dir = _s.value.editDirection
         withContext(Dispatchers.IO) {
-            LedgerDao.update(DatabaseHolder.get(), id, p, a,
+            LedgerDao.update(DatabaseHolder.get(), id, p, a, dir,
                 _s.value.editDate.trim().ifBlank { null },
                 _s.value.editNote.trim().ifBlank { null })
         }
         cancelEdit(); refresh()
+        val dirText = if (dir == "gave") "you lent ₹$a to ${p.replaceFirstChar { it.uppercase() }}"
+                     else "you borrowed ₹$a from ${p.replaceFirstChar { it.uppercase() }}"
         logActivity("Edited ledger entry",
-            "Ledger updated: ${p.replaceFirstChar { it.uppercase() }} ₹$a", "ledger")
+            "Ledger updated: $dirText", "ledger")
     }
 
     fun delete(id: Long) = viewModelScope.launch {
@@ -127,6 +138,13 @@ class LedgerViewModel : ViewModel() {
 @Composable
 fun LedgerScreen(vm: LedgerViewModel = viewModel()) {
     val state by vm.s.collectAsState()
+    val listState = rememberLazyListState()
+    val highlight = rememberHighlightState()
+    highlight.consumeOnLaunch(
+        route = "ledger",
+        listState = listState,
+        scrollIndex = { id -> state.rows.indexOfFirst { it.id == id } },
+    )
     Column(Modifier.fillMaxSize().padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
 
         SectionHeader(
@@ -183,16 +201,26 @@ fun LedgerScreen(vm: LedgerViewModel = viewModel()) {
         ) { Icon(Icons.Filled.Add, contentDescription = null); Spacer(Modifier.width(4.dp)); Text("Add") }
 
         HorizontalDivider()
-        LazyColumn(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        LazyColumn(state = listState, verticalArrangement = Arrangement.spacedBy(4.dp)) {
             items(state.rows, key = { it.id }) { r ->
+                val rowBg = highlight.backgroundFor(r.id)
                 if (state.editingId == r.id) {
-                    Column(Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                    Column(Modifier.fillMaxWidth().background(rowBg).padding(vertical = 4.dp),
                         verticalArrangement = Arrangement.spacedBy(4.dp)) {
                         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                             OutlinedTextField(value = state.editPerson, onValueChange = vm::setEditPerson,
                                 label = { Text("Person") }, singleLine = true, modifier = Modifier.weight(2f))
                             OutlinedTextField(value = state.editAmount, onValueChange = vm::setEditAmount,
                                 label = { Text("Amount") }, singleLine = true, modifier = Modifier.weight(1f))
+                        }
+                        Row(verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            FilterChip(selected = state.editDirection == "gave",
+                                onClick = { vm.setEditDirection("gave") },
+                                label = { Text("I lent") })
+                            FilterChip(selected = state.editDirection == "received",
+                                onClick = { vm.setEditDirection("received") },
+                                label = { Text("I owe") })
                         }
                         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                             OutlinedTextField(value = state.editDate, onValueChange = vm::setEditDate,
@@ -206,7 +234,7 @@ fun LedgerScreen(vm: LedgerViewModel = viewModel()) {
                         }
                     }
                 } else {
-                    Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                    Row(Modifier.fillMaxWidth().background(rowBg).padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                         Text(r.date ?: r.createdAt.take(10), style = MaterialTheme.typography.bodySmall,
                             modifier = Modifier.width(96.dp))
                         Column(Modifier.weight(1f)) {

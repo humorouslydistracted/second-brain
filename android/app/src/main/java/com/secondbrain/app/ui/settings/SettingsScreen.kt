@@ -22,6 +22,7 @@ import com.secondbrain.app.AppStatusBus
 import com.secondbrain.app.LlamaCpp
 import com.secondbrain.app.ui.ThemeSetting
 import com.secondbrain.app.data.DatabaseHolder
+import com.secondbrain.app.data.ModelRegistry
 import com.secondbrain.app.data.NotesDao
 import com.secondbrain.app.data.SelfName
 import com.secondbrain.app.embedding.EmbeddingsDao
@@ -37,7 +38,10 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.io.File
 
-private const val MODEL_FILENAME = "qwen3-1.7b-parser-q4_k_m.gguf"
+// Default filename used only as a fallback hint in the import-status section
+// when no GGUF is present yet. Once any qwen3-*-parser-q4_k_m.gguf is in the
+// models dir, [ModelRegistry] takes over and this constant is irrelevant.
+private const val DEFAULT_MODEL_FILENAME = "qwen3-1.7b-parser-q4_k_m.gguf"
 
 class SettingsViewModel : ViewModel() {
     data class S(
@@ -47,6 +51,9 @@ class SettingsViewModel : ViewModel() {
         val loaded: Boolean = false,
         val loadMs: Long = 0L,
         val status: String = "",
+        // ---- multi-model picker (1.7B vs 0.6B side-by-side) ----
+        val availableModels: List<String> = emptyList(),
+        val selectedModel: String? = null,
         // ---- embedding model state ----
         val embStatus: String = "",
         val embLoaded: Boolean = false,
@@ -61,6 +68,43 @@ class SettingsViewModel : ViewModel() {
     fun init(modelPath: String, exists: Boolean) {
         _s.update { it.copy(modelPath = modelPath, modelExists = exists,
             status = if (exists) "Model file found." else "Push GGUF to: $modelPath") }
+    }
+
+    /**
+     * Re-scan the models dir for parser GGUFs and refresh the picker state.
+     * Called from the Settings composable on first composition + after any
+     * import. Cheap (one directory listing); safe to call repeatedly.
+     */
+    fun refreshAvailableModels(modelDir: File) = viewModelScope.launch {
+        val (available, selected) = withContext(Dispatchers.IO) {
+            val files = ModelRegistry.discover(modelDir)
+            val active = ModelRegistry.resolveSelected(DatabaseHolder.get(), modelDir)
+            files.map { it.name } to active?.name
+        }
+        _s.update { it.copy(availableModels = available, selectedModel = selected) }
+    }
+
+    /**
+     * Switch to a different parser GGUF. Persists the choice via
+     * [ModelRegistry], unloads the currently-loaded model, then loads the
+     * new one. The Settings UI re-syncs from runtime singletons after.
+     */
+    fun selectModel(modelDir: File, filename: String) = viewModelScope.launch {
+        val target = File(modelDir, filename)
+        if (!target.exists()) {
+            _s.update { it.copy(status = "File missing: $filename") }
+            return@launch
+        }
+        withContext(Dispatchers.IO) {
+            ModelRegistry.setSelected(DatabaseHolder.get(), filename)
+        }
+        _s.update { it.copy(selectedModel = filename, status = "Switching to $filename…") }
+        // Unload current GGUF so loadModel actually reloads. forceUnload
+        // is the only path that releases the native model handle.
+        if (LlamaCpp.isLoaded()) LlamaCpp.forceUnload()
+        _s.update { it.copy(loaded = false) }
+        loadModel(target)
+        refreshAvailableModels(modelDir)
     }
 
     fun toggleGpu() = _s.update { it.copy(preferGpu = !it.preferGpu) }
@@ -159,7 +203,15 @@ class SettingsViewModel : ViewModel() {
         onDone(report.toString().trimEnd())
         // Refresh status panels so counts/file presence flip immediately
         refreshEmbeddingStatus(modelDir)
-        init(File(modelDir, MODEL_FILENAME).absolutePath, File(modelDir, MODEL_FILENAME).exists())
+        // Pick whichever GGUF the registry resolves (selected one if still
+        // present, else the first discovered) and show its path in the
+        // status row. Importing a 0.6B alongside the 1.7B will surface it
+        // here without changing the active model.
+        val active = ModelRegistry.resolveSelected(DatabaseHolder.get(), modelDir)
+        val pathFor = active?.absolutePath
+            ?: File(modelDir, DEFAULT_MODEL_FILENAME).absolutePath
+        init(pathFor, active != null)
+        refreshAvailableModels(modelDir)
     }
 
     private fun queryDisplayName(context: Context, uri: Uri): String? {
@@ -327,11 +379,14 @@ fun SettingsScreen(vm: SettingsViewModel = viewModel()) {
     val context = LocalContext.current
     val state by vm.s.collectAsState()
 
-    val modelFile = remember {
-        File(context.getExternalFilesDir("models"), MODEL_FILENAME)
-    }
     val embeddingDir = remember {
         File(context.getExternalFilesDir("models")!!.absolutePath)
+    }
+    // Resolve the currently-selected GGUF from the registry. Recomputed
+    // whenever the selected name in state changes (after switching models).
+    val modelFile = remember(state.selectedModel) {
+        ModelRegistry.resolveSelected(DatabaseHolder.get(), embeddingDir)
+            ?: File(embeddingDir, DEFAULT_MODEL_FILENAME)
     }
     LaunchedEffect(Unit) {
         // getExternalFilesDir(...) creates the dir as a side effect — call
@@ -339,6 +394,7 @@ fun SettingsScreen(vm: SettingsViewModel = viewModel()) {
         // importing anything.
         context.getExternalFilesDir("models")?.also { it.mkdirs() }
         vm.init(modelFile.absolutePath, modelFile.exists())
+        vm.refreshAvailableModels(embeddingDir)
         vm.refreshEmbeddingStatus(embeddingDir)
         // Pull live runtime state — auto-load may have already finished
         // before the user navigated to Settings; without this the buttons
@@ -391,13 +447,53 @@ fun SettingsScreen(vm: SettingsViewModel = viewModel()) {
             onClick = { vm.loadModel(modelFile) },
         ) { Text(if (state.loaded) "Loaded ✓" else "Load model") }
 
+        // ---- Multi-model picker ----------------------------------------
+        // Surfaces every parser GGUF discovered under models/ (matches
+        // qwen3-<size>-parser-q4_k_m.gguf). Tap any non-active row to
+        // switch: the registry persists the choice, the current model is
+        // unloaded, and the new one is loaded immediately. Lets us A/B
+        // 1.7B vs 0.6B for reliability + on-device latency without
+        // re-pushing files between runs.
+        if (state.availableModels.isNotEmpty()) {
+            Text(
+                "Available parser models",
+                style = MaterialTheme.typography.titleSmall,
+                modifier = Modifier.padding(top = 4.dp),
+            )
+            state.availableModels.forEach { name ->
+                val isActive = name == state.selectedModel
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    modifier = Modifier.fillMaxWidth(),
+                ) {
+                    RadioButton(
+                        selected = isActive,
+                        onClick = {
+                            if (!isActive) vm.selectModel(embeddingDir, name)
+                        },
+                    )
+                    Column(Modifier.weight(1f)) {
+                        Text(name, style = MaterialTheme.typography.bodyMedium)
+                        if (isActive) {
+                            Text(
+                                if (state.loaded) "active · loaded" else "active · not loaded",
+                                style = MaterialTheme.typography.labelSmall,
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
         HorizontalDivider()
 
         Text("Import model files", style = MaterialTheme.typography.titleMedium)
         Text(
-            "Files land in ${embeddingDir.absolutePath}. Pick `qwen3-1.7b-parser-q4_k_m.gguf`, " +
+            "Files land in ${embeddingDir.absolutePath}. Pick any " +
+                "`qwen3-<size>-parser-q4_k_m.gguf` (e.g. `qwen3-1.7b-...` and/or `qwen3-0.6b-...`), " +
                 "`minilm.onnx`, `minilm_vocab.txt`, and `minilm_tokenizer_config.json` from wherever you put them " +
-                "(Downloads is fine). Filenames are preserved.",
+                "(Downloads is fine). Both GGUFs can coexist — switch between them above. Filenames are preserved.",
             style = MaterialTheme.typography.bodySmall,
         )
         Button(onClick = {

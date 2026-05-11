@@ -48,6 +48,8 @@ object Orchestrator {
 
         var responseText = ""
         var kind = "unknown"
+        var targetRoute: String? = null
+        var targetRowId: Long? = null
         val undo = UndoBuilder()
         try {
             // ----- numbered-clarify resolution: highest priority -----
@@ -72,6 +74,8 @@ object Orchestrator {
                 val noteText = if (body.isBlank()) "" else body
                 if (noteText.isNotBlank()) {
                     val id = saveNote(db, noteText, undo)
+                    targetRoute = "notes"
+                    targetRowId = id
                     log.tier("note_bypass")
                     log.sql("insert.note", "INSERT INTO notes (...)", listOf(noteText), 1, listOf(mapOf("id" to id)))
                     responseText = "Note saved."
@@ -105,16 +109,27 @@ object Orchestrator {
                         log.error("parser failed: ${pr.reason}")
                         responseText = "Parser produced unusable output (${pr.reason}). Saved as plain note."
                         kind = "note"
-                        saveNote(db, tagged.composed, undo)
+                        val id = saveNote(db, tagged.composed, undo)
+                        targetRoute = "notes"
+                        targetRowId = id
                     }
                     is ParseResult.Ok -> {
                         responseText = when (val payload = pr.payload) {
                             is ParserPayload.Write -> {
                                 kind = "write"
-                                WriteRunner.run(db, payload, tagged.composed, log, undo)
+                                val out = WriteRunner.run(db, payload, tagged.composed, log, undo)
+                                targetRoute = laneToRoute(payload.lane)
+                                // First inserted row in the lane-specific table
+                                // is what we deep-link to. captures rows are
+                                // ignored here.
+                                targetRowId = undo.rowDeletes.firstOrNull {
+                                    it.first == laneToTable(payload.lane)
+                                }?.second
+                                out
                             }
                             is ParserPayload.Query -> {
                                 kind = "query"
+                                targetRoute = domainToRoute(payload.domain)
                                 QueryRunner.run(db, payload, log, userText = tagged.composed)
                             }
                         }
@@ -128,7 +143,7 @@ object Orchestrator {
         }
         // Lambda's final expression — withContext returns this. No bare
         // `return` here: suspend-inline lambdas reject non-local returns.
-        finalizeAndPersist(db, log, tStart, tagged, responseText, kind, undo.build())
+        finalizeAndPersist(db, log, tStart, tagged, responseText, kind, undo.build(), targetRoute, targetRowId)
     }
 
     private fun finalizeAndPersist(
@@ -139,15 +154,20 @@ object Orchestrator {
         responseText: String,
         kind: String,
         undo: UndoToken? = null,
+        targetRoute: String? = null,
+        targetRowId: Long? = null,
     ): OrchestratorResult {
         log.timing("total_ms", (System.nanoTime() - tStart) / 1_000_000)
         log.final(responseText)
+        val meta = JSONObject().apply {
+            put("tier", kind)
+            put("chips", tagged.activeChips.joinToString(",") { it.raw })
+            if (targetRoute != null) put("target_route", targetRoute)
+            if (targetRowId != null) put("target_row_id", targetRowId)
+        }
         val activityId = ActivityLogDao.insert(
             db = db, input = tagged.composed, response = responseText, kind = kind,
-            metadataJson = JSONObject(mapOf(
-                "tier" to kind,
-                "chips" to tagged.activeChips.joinToString(",") { it.raw },
-            )).toString(),
+            metadataJson = meta.toString(),
         )
         log.activityId = activityId
         log.persist(db)
@@ -189,4 +209,37 @@ object Orchestrator {
     }
 
     private val embeddingScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+
+    /** Map parser lane → drawer/tile route name (used for deep-link from Home). */
+    private fun laneToRoute(lane: String): String? = when (lane) {
+        "expense" -> "expenses"
+        "buy"     -> "buy"
+        "todo"    -> "todos"
+        "weight"  -> "weights"
+        "ledger"  -> "ledger"
+        "note"    -> "notes"
+        else      -> null
+    }
+
+    /** Map parser lane → SQLite table name (used to find inserted row id). */
+    private fun laneToTable(lane: String): String = when (lane) {
+        "expense" -> "expenses"
+        "buy"     -> "buy_items"
+        "todo"    -> "todos"
+        "weight"  -> "weights"
+        "ledger"  -> "ledger"
+        "note"    -> "notes"
+        else      -> lane
+    }
+
+    /** Map query domain → drawer/tile route name. Notes/queries don't highlight a row. */
+    private fun domainToRoute(domain: String): String? = when (domain) {
+        "expense" -> "expenses"
+        "buy"     -> "buy"
+        "todo"    -> "todos"
+        "weight"  -> "weights"
+        "ledger"  -> "ledger"
+        "note"    -> "notes"
+        else      -> null
+    }
 }

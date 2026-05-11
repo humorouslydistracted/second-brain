@@ -30,6 +30,8 @@ import com.secondbrain.app.data.DatabaseHolder
 import com.secondbrain.app.diag.formatTimestampForDisplay
 import com.secondbrain.app.orchestrator.RequestLogDao
 import com.secondbrain.app.orchestrator.Tag
+import com.secondbrain.app.ui.common.HighlightBus
+import org.json.JSONObject
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -136,7 +138,10 @@ fun HomeScreen(navController: NavHostController? = null, vm: HomeViewModel = vie
                         )
                     }
                     items(state.recent, key = { "act-${it.id}" }) { item ->
-                        HistoryCard(item)
+                        HistoryCard(item) { route, rowId ->
+                            if (rowId != null) HighlightBus.set(route, rowId)
+                            navController?.navigate(route)
+                        }
                     }
                 }
             }
@@ -231,10 +236,17 @@ private fun GreetingCard(greeting: String, summary: String?, allFacts: List<Stri
 // ───────────────────────────────────────────────────────────────────────────
 
 @Composable
-private fun HistoryCard(item: com.secondbrain.app.orchestrator.ActivityEntry) {
+private fun HistoryCard(
+    item: com.secondbrain.app.orchestrator.ActivityEntry,
+    onNavigate: (route: String, rowId: Long?) -> Unit = { _, _ -> },
+) {
     val accentColor = kindAccentColor(item.kind)
+    val target = remember(item.id) { resolveTarget(item) }
+    val clickModifier = if (target != null) {
+        Modifier.clickable { onNavigate(target.first, target.second) }
+    } else Modifier
     Card(
-        modifier = Modifier.fillMaxWidth(),
+        modifier = Modifier.fillMaxWidth().then(clickModifier),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
         shape = RoundedCornerShape(10.dp),
         elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
@@ -282,6 +294,91 @@ private fun HistoryCard(item: com.secondbrain.app.orchestrator.ActivityEntry) {
             }
         }
     }
+}
+
+/**
+ * Decide whether a Home activity row should deep-link, and to where.
+ *
+ * Three sources, tried in order until one yields a route:
+ *
+ * 1. **Orchestrator metadata** — the Home-input pipeline writes
+ *    `target_route` + `target_row_id` into `metadata_json`. When present
+ *    we honour it directly so the destination screen can highlight the
+ *    affected row.
+ *
+ * 2. **Input-text tag prefix** — works for any historical Home-input row
+ *    (orchestrator logs `kind="write"` / `"query"` which don't map to a
+ *    single domain on their own; the chip prefix in the input does).
+ *    Also picks up the rare `kind = null` rows.
+ *
+ * 3. **`kind` column** — covers page-CRUD writes (Add/Edit/toggle on
+ *    Buy / Ledger / Weights / Todos / Notes / Expenses, all of which
+ *    set a domain-specific `kind`) and the orchestrator note bypass.
+ *
+ * Always returns null for deletions / clears: the row no longer exists,
+ * so navigation would land on an unrelated entry. Detected by an exact
+ * `Deleted ` or `Cleared ` prefix (matches every per-screen
+ * `logActivity("Deleted X", …)` / `("Cleared X", …)` call site,
+ * case-sensitive so a user note starting with "deleted my…" stays
+ * clickable).
+ */
+private fun resolveTarget(item: com.secondbrain.app.orchestrator.ActivityEntry): Pair<String, Long?>? {
+    val input = item.inputText
+    if (input.startsWith("Deleted ") || input.startsWith("Cleared ")) return null
+    if (item.kind == "settings" || item.kind == "settings_error") return null
+
+    // 1) Explicit metadata wins (carries row id for the highlight flash).
+    parseMetadataTarget(item.metadataJson)?.let { return it }
+
+    // 2) Tag prefix in the input text (covers historical Home submissions
+    //    where the orchestrator logged kind="write" / "query" without
+    //    enough context to derive a route from kind alone).
+    inputTagToRoute(input)?.let { return it to null }
+
+    // 3) Fall back to the `kind` column.
+    val route = kindToRoute(item.kind) ?: return null
+    return route to null
+}
+
+private fun parseMetadataTarget(metadataJson: String?): Pair<String, Long?>? {
+    if (metadataJson.isNullOrBlank()) return null
+    return try {
+        val o = JSONObject(metadataJson)
+        val route = o.optString("target_route", "").ifBlank { null } ?: return null
+        val id = if (o.has("target_row_id") && !o.isNull("target_row_id"))
+            o.optLong("target_row_id") else null
+        route to id
+    } catch (_: Throwable) { null }
+}
+
+/**
+ * Pull the chip tag (`expense:`, `buy:`, `todo:`, `weight:`, `ledger:`,
+ * `note:`) off the front of the user's input and map it to a route.
+ * `ask:` deliberately returns null — without metadata we don't know
+ * which domain it queried.
+ */
+private fun inputTagToRoute(input: String): String? {
+    val head = input.trimStart().substringBefore(':', "").trim().lowercase()
+    return when (head) {
+        "expense" -> "expenses"
+        "buy"     -> "buy"
+        "todo", "task" -> "todos"
+        "weight"  -> "weights"
+        "ledger"  -> "ledger"
+        "note"    -> "notes"
+        else      -> null
+    }
+}
+
+/** Map an `activity_log.kind` to the matching nav route, or null if non-navigable. */
+private fun kindToRoute(kind: String?): String? = when (kind) {
+    "expense" -> "expenses"
+    "buy"     -> "buy"
+    "todo"    -> "todos"
+    "weight"  -> "weights"
+    "ledger"  -> "ledger"
+    "note"    -> "notes"
+    else      -> null  // query / write / unknown / clarify_resolution / null
 }
 
 private fun kindAccentColor(kind: String?): Color = when (kind) {

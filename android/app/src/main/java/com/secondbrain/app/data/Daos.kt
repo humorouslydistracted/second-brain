@@ -162,9 +162,10 @@ object LedgerDao {
             put("direction", direction); put("note", note); put("date", today())
         })
 
-    fun update(db: AppDatabase, id: Long, person: String, amount: Double, date: String?, note: String?): Int =
+    fun update(db: AppDatabase, id: Long, person: String, amount: Double, direction: String, date: String?, note: String?): Int =
         db.writableDatabase.update("ledger", ContentValues().apply {
             put("person", person.lowercase().trim()); put("amount", amount)
+            put("direction", direction)
             put("date", date ?: today()); put("note", note)
         }, "id=?", arrayOf(id.toString()))
 

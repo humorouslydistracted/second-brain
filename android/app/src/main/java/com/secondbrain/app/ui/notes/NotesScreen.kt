@@ -1,8 +1,10 @@
 package com.secondbrain.app.ui.notes
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
@@ -23,6 +25,9 @@ import com.secondbrain.app.embedding.EmbeddingsDao
 import com.secondbrain.app.embedding.MiniLmEncoder
 import com.secondbrain.app.orchestrator.ActivityLogDao
 import com.secondbrain.app.ui.common.SectionHeader
+import com.secondbrain.app.ui.common.backgroundFor
+import com.secondbrain.app.ui.common.consumeOnLaunch
+import com.secondbrain.app.ui.common.rememberHighlightState
 import com.secondbrain.app.ui.common.renderTable
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -98,6 +103,13 @@ class NotesViewModel : ViewModel() {
 @Composable
 fun NotesScreen(vm: NotesViewModel = viewModel()) {
     val state by vm.s.collectAsState()
+    val listState = rememberLazyListState()
+    val highlight = rememberHighlightState()
+    highlight.consumeOnLaunch(
+        route = "notes",
+        listState = listState,
+        scrollIndex = { id -> state.rows.indexOfFirst { it.id == id } },
+    )
 
     Column(Modifier.fillMaxSize().padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
 
@@ -130,10 +142,11 @@ fun NotesScreen(vm: NotesViewModel = viewModel()) {
         }
         HorizontalDivider()
 
-        LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        LazyColumn(state = listState, verticalArrangement = Arrangement.spacedBy(8.dp)) {
             items(state.rows, key = { it.id }) { row ->
+                val rowBg = highlight.backgroundFor(row.id)
                 ElevatedCard {
-                    Column(Modifier.fillMaxWidth().padding(10.dp)) {
+                    Column(Modifier.fillMaxWidth().background(rowBg).padding(10.dp)) {
                         Text(row.createdAt, style = MaterialTheme.typography.labelSmall)
                         if (state.editingId == row.id) {
                             OutlinedTextField(

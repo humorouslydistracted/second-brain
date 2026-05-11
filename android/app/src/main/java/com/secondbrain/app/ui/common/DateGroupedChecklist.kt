@@ -1,5 +1,6 @@
 package com.secondbrain.app.ui.common
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
@@ -43,6 +44,12 @@ fun <T : DatedChecklistItem> DateGroupedChecklist(
     itemBody: @Composable (T) -> Unit,
     modifier: Modifier = Modifier,
     onEdit: ((Long) -> Unit)? = null,
+    /**
+     * Route name used to drain [HighlightBus] on first composition. When the
+     * route matches, the corresponding item gets a brief background flash and
+     * the list scrolls to it. Pass null to disable.
+     */
+    highlightRoute: String? = null,
 ) {
     val today = remember { LocalDate.now().toString() }
     val listState = rememberLazyListState()
@@ -64,6 +71,19 @@ fun <T : DatedChecklistItem> DateGroupedChecklist(
         }
         if (anchor < 0) anchor = 0  // all rows are future; land at top
         rows to anchor
+    }
+
+    val highlight = rememberHighlightState()
+    if (highlightRoute != null) {
+        highlight.consumeOnLaunch(
+            route = highlightRoute,
+            listState = listState,
+            scrollIndex = { id ->
+                flatRows.indexOfFirst { row ->
+                    row is FlatRow.Item && row.value.id == id
+                }
+            },
+        )
     }
 
     LaunchedEffect(items.size, todayAnchorIndex) {
@@ -92,8 +112,9 @@ fun <T : DatedChecklistItem> DateGroupedChecklist(
             when (row) {
                 is FlatRow.Header<*> -> DateHeader(row.date, isToday = row.date == today)
                 is FlatRow.Item -> {
+                    val rowBg = highlight.backgroundFor(row.value.id)
                     Row(
-                        Modifier.fillMaxWidth().padding(vertical = 2.dp, horizontal = 4.dp),
+                        Modifier.fillMaxWidth().background(rowBg).padding(vertical = 2.dp, horizontal = 4.dp),
                         verticalAlignment = Alignment.CenterVertically,
                     ) {
                         Checkbox(

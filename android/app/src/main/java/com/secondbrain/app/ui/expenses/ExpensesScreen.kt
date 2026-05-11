@@ -1,8 +1,10 @@
 package com.secondbrain.app.ui.expenses
 
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Delete
@@ -22,6 +24,9 @@ import com.secondbrain.app.data.ExpenseRow
 import com.secondbrain.app.data.ExpensesDao
 import com.secondbrain.app.orchestrator.ActivityLogDao
 import com.secondbrain.app.ui.common.SectionHeader
+import com.secondbrain.app.ui.common.backgroundFor
+import com.secondbrain.app.ui.common.consumeOnLaunch
+import com.secondbrain.app.ui.common.rememberHighlightState
 import com.secondbrain.app.ui.common.renderTable
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -155,7 +160,27 @@ fun ExpensesScreen(vm: ExpensesViewModel = viewModel()) {
                 .entries.sortedByDescending { it.key }
         }
 
-        LazyColumn(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        // Compute the flat LazyList index for a row id (header + items per group).
+        val listState = rememberLazyListState()
+        val highlight = rememberHighlightState()
+        highlight.consumeOnLaunch(
+            route = "expenses",
+            listState = listState,
+            scrollIndex = { id ->
+                var i = 0
+                var found = -1
+                loop@ for ((_, items) in grouped) {
+                    i++ // header
+                    for (it in items) {
+                        if (it.id == id) { found = i; break@loop }
+                        i++
+                    }
+                }
+                found
+            },
+        )
+
+        LazyColumn(state = listState, verticalArrangement = Arrangement.spacedBy(4.dp)) {
             grouped.forEach { (date, items) ->
                 val dayTotal = items.sumOf { it.amount }
                 item(key = "hdr-$date") {
@@ -173,8 +198,9 @@ fun ExpensesScreen(vm: ExpensesViewModel = viewModel()) {
                     HorizontalDivider()
                 }
                 items(items, key = { it.id }) { r ->
+                    val rowBg = highlight.backgroundFor(r.id)
                     if (state.editingId == r.id) {
-                        Column(Modifier.fillMaxWidth().padding(vertical = 4.dp),
+                        Column(Modifier.fillMaxWidth().background(rowBg).padding(vertical = 4.dp),
                             verticalArrangement = Arrangement.spacedBy(4.dp)) {
                             Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                                 OutlinedTextField(value = state.editAmount, onValueChange = vm::setEditAmount,
@@ -194,7 +220,7 @@ fun ExpensesScreen(vm: ExpensesViewModel = viewModel()) {
                             }
                         }
                     } else {
-                        Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Row(Modifier.fillMaxWidth().background(rowBg).padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                             Text("₹${formatAmount(r.amount)}", style = MaterialTheme.typography.bodyMedium,
                                 modifier = Modifier.width(80.dp))
                             Column(Modifier.weight(1f)) {
