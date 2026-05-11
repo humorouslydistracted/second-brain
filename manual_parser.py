@@ -84,8 +84,15 @@ def split_tag(text: str):
 # Mirrors AMOUNT_RE in ManualParser.kt
 AMOUNT_RE = re.compile(
     r"(?:rs\.?\s*|₹\s*|usd\s+|\$\s*)?"
-    r"(\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:\.\d+)?)"
-    r"\s*(?:/-|k|l|crore|crores|lakh|lakhs|thousand|rs\.?|rupees?|₹)?",
+    # `\b` BEFORE the number prevents digits inside `ZEE5`/`1509abc`
+    # from being matched as standalone amounts. NO `\b` after — that
+    # would block `5k`/`2L` (`5k` is one word, no boundary between
+    # digit and `k`).
+    r"\b(\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:\.\d+)?)"
+    # Trailing suffix: each option ends with a word boundary so `k`
+    # doesn't consume the leading char of `kaasu`/`kasu`, `l` doesn't
+    # eat into `lakh`, `lakh` matches `lakh` not `lakhier`.
+    r"(?:\s*(?:/-|(?:k|l|crore|crores|lakh|lakhs|thousand|rs\.?|rupees?|₹)\b))?",
     re.IGNORECASE,
 )
 NUMBER_RE = re.compile(r"\d+(?:\.\d+)?")
@@ -95,7 +102,37 @@ COLON_AMOUNT_RE = re.compile(
     r"(?:k|l|crore|crores|lakh|lakhs|thousand)?)",
     re.IGNORECASE,
 )
-CURRENCY_WORD_RE = re.compile(r"(?<!\w)(rs\.?|rupees?|₹|inr|usd)(?!\w)", re.IGNORECASE)
+CURRENCY_WORD_RE = re.compile(
+    r"(?<!\w)(rs\.?|rupees?|₹|inr|usd|kaasu|kasu)(?!\w)",
+    re.IGNORECASE,
+)
+
+# V2: extra framing words that decorate expense/buy descriptions without
+# adding meaning. Stripped from both ends so `on petrol`/`petrol ku` →
+# `petrol`, `purchased X worth 5L` → `X`.
+_FRAMING_PREFIX_RE = re.compile(
+    r"^\s*(?:on|for|spent|purchased|bought|paid|paid\s+for|worth)\s+",
+    re.IGNORECASE,
+)
+_FRAMING_SUFFIX_RE = re.compile(
+    r"\s+(?:ku|kku|le|la|for|worth|"
+    r"vaanginen|vaangina|vaaganum|vaanga\s+vendiyathu|"
+    r"vanganum|kekanum|book\s+pannanum|"
+    r"coming|comming|this|after\s+house\s+warming)\s*$",
+    re.IGNORECASE,
+)
+
+
+def strip_framing(s: str) -> str:
+    """Strip framing prefixes/suffixes and currency-marker words."""
+    prev = None
+    cur = s
+    # Iterate because suffixes can cascade (`X ku vaanginen`).
+    while cur != prev:
+        prev = cur
+        cur = _FRAMING_PREFIX_RE.sub("", cur)
+        cur = _FRAMING_SUFFIX_RE.sub("", cur)
+    return strip_currency_words(cur)
 
 
 def parse_amount(raw: str):
@@ -187,6 +224,21 @@ def this_year(today: date) -> DateRange:
 
 def last_year(today: date) -> DateRange:
     return DateRange(date(today.year - 1, 1, 1), date(today.year - 1, 12, 31))
+
+
+def _next_month(today: date) -> DateRange:
+    """Whole-month range of the month AFTER today's month."""
+    if today.month == 12:
+        start = date(today.year + 1, 1, 1)
+        end = date(today.year + 1, 1, 31)
+    else:
+        start = date(today.year, today.month + 1, 1)
+        # Last day of next month: jump one more, subtract one day
+        if start.month == 12:
+            end = date(start.year + 1, 1, 1) - timedelta(days=1)
+        else:
+            end = date(start.year, start.month + 1, 1) - timedelta(days=1)
+    return DateRange(start, end)
 
 
 def weekend(today: date) -> DateRange:
@@ -286,6 +338,55 @@ DATE_RANGE_PHRASES = [
 
 
 def extract_date_range_phrase(lower: str, today: date):
+    # V2: Tanglish phrases handled FIRST so they don't get partially
+    # consumed by English fallback patterns.
+    #   pona <day>            → last <day>           (DateRange)
+    #   pona maasam           → last month
+    #   pona varusham         → last year
+    #   indha maasam          → this month
+    #   indha varusham        → this year
+    #   varum maasam          → next month  (treated as next month range)
+    #   nethu / nethaiku      → yesterday
+    #   naliku / naalai       → tomorrow
+    #   indha kaalaila        → today
+    tanglish_simple = [
+        ('pona maasam', lambda t: last_month(t)),
+        ('pona varusham', lambda t: last_year(t)),
+        ('pona varusam', lambda t: last_year(t)),
+        ('indha maasam', lambda t: this_month(t)),
+        ('indha varusham', lambda t: this_year(t)),
+        ('indha varusam', lambda t: this_year(t)),
+        ('varum maasam', lambda t: _next_month(t)),
+        ('indha kaalaila', lambda t: this_day(t)),
+        ('nethaiku', lambda t: this_day(t - timedelta(days=1))),
+        ('nethu', lambda t: this_day(t - timedelta(days=1))),
+        ('naliku', lambda t: this_day(t + timedelta(days=1))),
+        ('naalai', lambda t: this_day(t + timedelta(days=1))),
+    ]
+    for phrase, fn in tanglish_simple:
+        idx = lower.find(phrase)
+        if idx >= 0:
+            residual = (lower[:idx] + lower[idx + len(phrase):]).strip()
+            try:
+                rng = fn(today)
+                return rng, residual
+            except Exception:
+                pass
+
+    # Tanglish: pona <day> → last <day>
+    m = re.search(r"\bpona\s+(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b", lower)
+    if m:
+        dow = list(_DAYS).index(m.group(1))
+        residual = (lower[:m.start()] + lower[m.end():]).strip()
+        return last_day(today, dow), residual
+
+    # Tanglish: varum <day> → next <day>
+    m = re.search(r"\bvarum\s+(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b", lower)
+    if m:
+        dow = list(_DAYS).index(m.group(1))
+        residual = (lower[:m.start()] + lower[m.end():]).strip()
+        return next_day(today, dow), residual
+
     # Pass 1: simple canonical phrases (this/last week/month/year/etc.)
     for phrase, fn in DATE_RANGE_PHRASES:
         idx = lower.find(phrase)
@@ -436,15 +537,107 @@ def parse_absolute_date(raw: str, today: date):
 
 
 def strip_trailing_date(text: str, today: date):
-    lower = text.lower()
-    for phrase, fn in (
+    """
+    Find and strip a trailing date phrase. V2 expansion: also recognizes
+    `next/last <day>`, `weekend`, Tanglish (`pona <day>`, `nethu`,
+    `naliku`, `innaiku`, `indha kaalaila`, `pona maasam`, etc.) at the
+    END of the text.
+    """
+    lower = text.lower().rstrip()
+
+    # Tanglish single-word dates at end (relative to today).
+    tanglish_simple = [
+        ("indha kaalaila", today),
+        ("innaiku", today),
+        ("nethaiku", today - timedelta(days=1)),
+        ("nethu", today - timedelta(days=1)),
+        ("naalaiku", today + timedelta(days=1)),
+        ("naliku", today + timedelta(days=1)),
+        ("naalai", today + timedelta(days=1)),
+    ]
+    for phrase, dt in tanglish_simple:
+        if lower.endswith(phrase):
+            stripped = text[: len(text) - len(phrase)].strip().rstrip(",;:-").strip()
+            return stripped, dt
+
+    # `pona <day>` / `varum <day>` / `next <day>` / `last <day>` / `this <day>`
+    m = re.search(
+        r"\b(?:pona|last|previous)\s+(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\s*$",
+        lower,
+    )
+    if m:
+        dow = list(_DAYS).index(m.group(1))
+        rng = last_day(today, dow)
+        stripped = text[: m.start()].strip().rstrip(",;:-").strip()
+        return stripped, rng.start
+    m = re.search(
+        r"\b(?:varum|next)\s+(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\s*$",
+        lower,
+    )
+    if m:
+        dow = list(_DAYS).index(m.group(1))
+        rng = next_day(today, dow)
+        stripped = text[: m.start()].strip().rstrip(",;:-").strip()
+        return stripped, rng.start
+    m = re.search(
+        r"\bthis\s+(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\s*$",
+        lower,
+    )
+    if m:
+        day = m.group(1)
+        dow = list(_DAYS).index(day)
+        delta = (dow - today.weekday()) % 7
+        d = today + timedelta(days=delta)
+        stripped = text[: m.start()].strip().rstrip(",;:-").strip()
+        return stripped, d
+
+    # `<n> days ago`
+    m = re.search(r"\b(\d+|two|three|four|five|six|seven)\s+days?\s+ago\s*$", lower)
+    if m:
+        word_to_n = {"two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "seven": 7}
+        token = m.group(1)
+        n = int(token) if token.isdigit() else word_to_n.get(token, 1)
+        stripped = text[: m.start()].strip().rstrip(",;:-").strip()
+        return stripped, today - timedelta(days=n)
+
+    # `last/this week|month|year` / `weekend`
+    for phrase, fn in [
+        ("last week", lambda t: last_week(t)),
+        ("last month", lambda t: last_month(t)),
+        ("last year", lambda t: last_year(t)),
+        ("this week", lambda t: this_week(t)),
+        ("this month", lambda t: this_month(t)),
+        ("this year", lambda t: this_year(t)),
+        ("weekend", lambda t: weekend(t)),
+    ]:
+        if lower.endswith(phrase):
+            rng = fn(today)
+            stripped = text[: len(text) - len(phrase)].strip().rstrip(",;:-").strip()
+            return stripped, rng.start
+
+    # `pona maasam` / `indha maasam` / `varum maasam` / `pona varusham` etc.
+    for phrase, fn in [
+        ("pona maasam", lambda t: last_month(t)),
+        ("indha maasam", lambda t: this_month(t)),
+        ("varum maasam", lambda t: _next_month(t)),
+        ("pona varusham", lambda t: last_year(t)),
+        ("indha varusham", lambda t: this_year(t)),
+    ]:
+        if lower.endswith(phrase):
+            rng = fn(today)
+            stripped = text[: len(text) - len(phrase)].strip().rstrip(",;:-").strip()
+            return stripped, rng.start
+
+    # Canonical English single-day phrases.
+    for phrase, dt in (
         ("yesterday", today - timedelta(days=1)),
         ("tomorrow", today + timedelta(days=1)),
         ("today", today),
     ):
         if lower.endswith(phrase):
-            stripped = text[: len(text) - len(phrase)].strip().rstrip(",;").strip()
-            return stripped, fn
+            stripped = text[: len(text) - len(phrase)].strip().rstrip(",;:-").strip()
+            return stripped, dt
+
     m = TRAILING_ABSOLUTE_DATE_RE.search(text)
     if m:
         parsed = parse_absolute_date(m.group(1).strip(), today)
@@ -454,22 +647,140 @@ def strip_trailing_date(text: str, today: date):
     return text, None
 
 
+def find_date_range_anywhere(text: str, today: date):
+    """
+    Like find_date_anywhere but returns a full DateRange. Used by
+    queries where the gold output uses date_start/date_end ranges
+    (last month = first..last day of month, etc.).
+    """
+    lower = text.lower()
+    for phrase, fn in [
+        ("last week", lambda t: last_week(t)),
+        ("last month", lambda t: last_month(t)),
+        ("last year", lambda t: last_year(t)),
+        ("this week", lambda t: this_week(t)),
+        ("this month", lambda t: this_month(t)),
+        ("this year", lambda t: this_year(t)),
+        ("current month", lambda t: this_month(t)),
+        ("current week", lambda t: this_week(t)),
+        ("current year", lambda t: this_year(t)),
+        ("weekend", lambda t: weekend(t)),
+        ("pona maasam", lambda t: last_month(t)),
+        ("indha maasam", lambda t: this_month(t)),
+        ("varum maasam", lambda t: _next_month(t)),
+        ("pona varusham", lambda t: last_year(t)),
+        ("indha varusham", lambda t: this_year(t)),
+    ]:
+        if phrase in lower:
+            return fn(today)
+    d = find_date_anywhere(text, today)
+    if d is not None:
+        return DateRange(d, d)
+    return None
+
+
+def find_date_anywhere(text: str, today: date):
+    """
+    Scan the ENTIRE text for a date phrase (Tanglish, English, absolute).
+    Used by lanes whose dataset keeps the date phrase IN the record's
+    text field (notably todo) — so we set `date` correctly but return
+    text unchanged.
+
+    Returns the resolved date or None.
+    """
+    lower = text.lower()
+    # Tanglish single-word dates (anywhere)
+    tanglish_simple = [
+        ("indha kaalaila", today),
+        ("innaiku", today),
+        ("nethaiku", today - timedelta(days=1)),
+        ("nethu", today - timedelta(days=1)),
+        ("naalaiku", today + timedelta(days=1)),
+        ("naliku", today + timedelta(days=1)),
+        ("naalai", today + timedelta(days=1)),
+    ]
+    for phrase, dt in tanglish_simple:
+        if phrase in lower:
+            return dt
+    # pona <day>, varum <day>, next/last/this <day>
+    m = re.search(r"\b(?:pona|last|previous)\s+(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b", lower)
+    if m:
+        dow = list(_DAYS).index(m.group(1))
+        return last_day(today, dow).start
+    m = re.search(r"\b(?:varum|next)\s+(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b", lower)
+    if m:
+        dow = list(_DAYS).index(m.group(1))
+        return next_day(today, dow).start
+    m = re.search(r"\bthis\s+(monday|tuesday|wednesday|thursday|friday|saturday|sunday)\b", lower)
+    if m:
+        day = m.group(1)
+        dow = list(_DAYS).index(day)
+        delta = (dow - today.weekday()) % 7
+        return today + timedelta(days=delta)
+    m = re.search(r"\b(\d+|two|three|four|five|six|seven)\s+days?\s+ago\b", lower)
+    if m:
+        word_to_n = {"two": 2, "three": 3, "four": 4, "five": 5, "six": 6, "seven": 7}
+        token = m.group(1)
+        n = int(token) if token.isdigit() else word_to_n.get(token, 1)
+        return today - timedelta(days=n)
+    for phrase, fn in [
+        ("last week", lambda t: last_week(t)),
+        ("last month", lambda t: last_month(t)),
+        ("last year", lambda t: last_year(t)),
+        ("this week", lambda t: this_week(t)),
+        ("this month", lambda t: this_month(t)),
+        ("this year", lambda t: this_year(t)),
+        ("weekend", lambda t: weekend(t)),
+        ("pona maasam", lambda t: last_month(t)),
+        ("indha maasam", lambda t: this_month(t)),
+        ("varum maasam", lambda t: _next_month(t)),
+        ("pona varusham", lambda t: last_year(t)),
+        ("indha varusham", lambda t: this_year(t)),
+    ]:
+        if phrase in lower:
+            return fn(today).start
+    if "yesterday" in lower:
+        return today - timedelta(days=1)
+    if "tomorrow" in lower:
+        return today + timedelta(days=1)
+    if " today" in lower or lower.startswith("today"):
+        return today
+    # Absolute dates
+    m = TRAILING_ABSOLUTE_DATE_RE.search(text)
+    if m:
+        return parse_absolute_date(m.group(1).strip(), today)
+    return None
+
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Multi-record split
 # ─────────────────────────────────────────────────────────────────────────────
 
 MULTI_SPLIT_RE = re.compile(r"\s*(?:,|;|\||&|\sand\s)\s*")
-# Same as MULTI_SPLIT_RE but also breaks on newlines — used by buy writes
-# whose dataset frequently has one item per line.
 MULTI_SPLIT_NL_RE = re.compile(r"\s*(?:\r?\n|,|;|\||&|\sand\s)\s*")
+# V2: pre-mask `\d,\d` (e.g. `17,628`) so the comma there isn't a record
+# separator. Replace the comma with a sentinel that survives the split,
+# then restore.
+_NUM_COMMA_RE = re.compile(r"(?<=\d),(?=\d)")
+_NUM_COMMA_SENTINEL = "\x00NCOMMA\x00"
+
+
+def _mask_number_commas(s: str) -> str:
+    return _NUM_COMMA_RE.sub(_NUM_COMMA_SENTINEL, s)
+
+
+def _unmask_number_commas(s: str) -> str:
+    return s.replace(_NUM_COMMA_SENTINEL, ",")
 
 
 def split_multi(body: str):
-    return [p.strip() for p in MULTI_SPLIT_RE.split(body) if p.strip()]
+    masked = _mask_number_commas(body)
+    return [_unmask_number_commas(p.strip()) for p in MULTI_SPLIT_RE.split(masked) if p.strip()]
 
 
 def split_multi_nl(body: str):
-    return [p.strip() for p in MULTI_SPLIT_NL_RE.split(body) if p.strip()]
+    masked = _mask_number_commas(body)
+    return [_unmask_number_commas(p.strip()) for p in MULTI_SPLIT_NL_RE.split(masked) if p.strip()]
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -562,6 +873,9 @@ def titleish(s: str) -> str:
 
 def parse_expense_write(body: str, today: date) -> dict:
     stripped, shared_date = strip_trailing_date(body, today)
+    # V2: if no trailing date found but the body has one embedded, use that.
+    if shared_date is None:
+        shared_date = find_date_anywhere(body, today)
     parts = split_multi(stripped)
     records = []
     for p in parts:
@@ -579,7 +893,7 @@ def parse_single_expense(text: str, fallback_date: date):
     rec_date = per_record_date or fallback_date
     cm = COLON_AMOUNT_RE.search(trimmed)
     if cm:
-        desc = strip_currency_words(cm.group(1))
+        desc = strip_framing(cm.group(1))
         amt = parse_amount(cm.group(2))
         if amt is None or not desc:
             return None
@@ -587,8 +901,14 @@ def parse_single_expense(text: str, fallback_date: date):
     m = AMOUNT_RE.search(trimmed)
     if m is None:
         return None
-    before = strip_currency_words(trimmed[: m.start()])
-    after = strip_currency_words(trimmed[m.end():])
+    # V2: strip a date phrase out of the right-side residual before
+    # framing-strip so `Iodex tube for 2,558 weekend` doesn't keep
+    # `weekend` glued to the description.
+    after_raw, post_date = strip_trailing_date(trimmed[m.end():], fallback_date)
+    if post_date is not None:
+        rec_date = post_date
+    before = strip_framing(trimmed[: m.start()])
+    after = strip_framing(after_raw)
     amt = parse_amount(m.group(0))
     if amt is None:
         return None
@@ -619,15 +939,29 @@ def expense_record(description: str, amount: float, d: date) -> dict:
 # ─────────────────────────────────────────────────────────────────────────────
 
 QTY_UNIT_TRAILING_RE = re.compile(
-    r"\s+(\d+(?:\.\d+)?)\s*(kg|g|ml|l|pack|packet|dozen|box|bottle|piece|pieces|nos|no)?\s*$",
+    r"\s+(\d+(?:\.\d+)?)\s*(kg|kgs|g|gms|grams|ml|l|ltr|litre|litres|liter|liters|"
+    r"pack|packs|packet|packets|dozen|box|bottle|piece|pieces|nos|no)?\s*$",
     re.IGNORECASE,
 )
+# Unit text normalization to match dataset canonical form.
+_UNIT_NORMALIZE = {
+    "kgs": "kg", "gms": "g", "grams": "g", "ltr": "L", "litre": "L",
+    "litres": "L", "liter": "L", "liters": "L", "packs": "pack",
+    "packets": "pack", "packet": "pack",
+}
+
+
+def _norm_unit(u):
+    if u is None:
+        return None
+    low = u.lower()
+    return _UNIT_NORMALIZE.get(low, u)
 
 
 def parse_buy_write(body: str, today: date) -> dict:
     stripped, shared_date = strip_trailing_date(body, today)
-    # V1.1: buy lists frequently have one item per line; include `\n` in
-    # the split so multi-line shopping lists become multi-record writes.
+    if shared_date is None:
+        shared_date = find_date_anywhere(body, today)
     parts = split_multi_nl(stripped)
     records = []
     for p in parts:
@@ -643,18 +977,28 @@ def parse_buy_write(body: str, today: date) -> dict:
 def parse_single_buy(text: str, fallback_date: date):
     trimmed, per_record_date = strip_trailing_date(text, fallback_date)
     rec_date = per_record_date or fallback_date
-    # V1.1: drop leading bullet markers (`- `, `* `, `• `, `1. `) and the
-    # filler verbs `pick up` / `get` / `grab` that the dataset never
-    # includes in the canonical item_text.
+    # V1.1: drop leading bullet markers + filler verbs.
     raw = re.sub(r"^[\-\*•\d]+[\.\)]?\s+", "", trimmed.strip())
     raw = re.sub(r"^(?:pick\s+up|get|grab|buy)\s+", "", raw, flags=re.IGNORECASE).strip()
+    # V2: trailing day-name (`X wednesday`, `X monday`).
+    raw = re.sub(
+        r"\s+(?:on\s+)?(?:monday|tuesday|wednesday|thursday|friday|saturday|sunday)\s*$",
+        "", raw, flags=re.IGNORECASE,
+    ).strip()
+    # V2: Tanglish trailing tails (`list la add pannanum`, `vanganum`,
+    # `vaanga vendiyathu`, `coming monday`, etc.).
+    raw = re.sub(
+        r"\s+list\s+(?:la|le)\s+add\s+pann(?:anum|a)\s*$",
+        "", raw, flags=re.IGNORECASE,
+    ).strip()
+    raw = strip_framing(raw).strip()
     if not raw:
         return None
     m = QTY_UNIT_TRAILING_RE.search(raw)
     if m:
         item = raw[: m.start()].strip()
         qty = (m.group(1) or "").strip() or None
-        unit = (m.group(2) or "").strip() or None
+        unit = _norm_unit((m.group(2) or "").strip() or None)
         if not item:
             return None
         return buy_record(item, qty, unit, rec_date)
@@ -686,11 +1030,13 @@ def parse_todo_write(body: str, today: date) -> dict:
             parts = comma_parts
     records = []
     for p in parts:
-        # Strip leading bullet markers (`- ` / `* ` / `• ` / `1. `) so the
-        # canonical text matches the dataset's bullet-stripped form.
+        # Strip leading bullet markers (`- ` / `* ` / `• ` / `1. `).
         clean_p = re.sub(r"^[\-\*•\d]+[\.\)]?\s+", "", p)
-        text, d = strip_trailing_date(clean_p, today)
-        cleaned = text.strip()
+        # V2: per-record date detection. The dataset keeps the date
+        # phrase IN the text field (verbatim) but sets `date` correctly.
+        # So we scan the WHOLE record text for a date and don't strip.
+        d = find_date_anywhere(clean_p, today)
+        cleaned = clean_p.strip()
         if not cleaned:
             return reject("todo", "incomplete_input")
         records.append({"text": cleaned, "date": _date_str(d or today)})
@@ -704,13 +1050,9 @@ def parse_todo_write(body: str, today: date) -> dict:
 # ─────────────────────────────────────────────────────────────────────────────
 
 def parse_weight_write(body: str, today: date) -> dict:
-    """
-    V1.1: comma-split multi-person inputs like
-        weight: Hemanth 74.89 kg, Eashwar 80.55 empty stomach 12 july
-    Each part now goes through the single-record parser. Single-record
-    behavior is unchanged.
-    """
     stripped, shared_date = strip_trailing_date(body, today)
+    if shared_date is None:
+        shared_date = find_date_anywhere(body, today)
     parts = split_multi(stripped)
     if len(parts) > 1:
         records = []
@@ -772,11 +1114,50 @@ def extract_weight_person_hint(before: str):
 # Write: ledger
 # ─────────────────────────────────────────────────────────────────────────────
 
-LEDGER_REPAY_DEBT = ["paid back", "repaid", "repay", "settled with"]
-LEDGER_COLLECT_CRED = ["returned", "paid me back", "gave back"]
-LEDGER_ADD_CREDIT = ["gave", "lent", "sent", "advanced", "lent to"]
-LEDGER_ADD_DEBT = ["borrowed from", "got from", "received from", "owe", "i owe", "took from"]
-LEDGER_SETTLE = ["settled", "cleared", "closed", "wrote off"]
+LEDGER_REPAY_DEBT = [
+    "paid back", "repaid", "repay", "settled with",
+    # Tanglish: bakki kudutiten (paid the rest), thiruppi kudutiten (returned)
+    "bakki kudutiten", "bakki kudutten", "thiruppi kudutiten",
+]
+LEDGER_COLLECT_CRED = [
+    "returned", "paid me back", "gave back",
+    # Tanglish: vasooli pannita / vasooli panniten (collected)
+    "vasooli pannita", "vasooli panniten", "vasooli pannita",
+]
+LEDGER_ADD_CREDIT = [
+    "gave", "lent", "sent", "advanced", "lent to",
+    # Tanglish: kasu kudutiten / kudutiten (gave money to)
+    "kasu kudutiten", "kudutiten", "kudutten", "kuduthen",
+]
+LEDGER_ADD_DEBT = [
+    "borrowed from", "got from", "received from", "received", "took from", "owe", "i owe",
+    # Tanglish: vaangiten / vaangina / vaanginen (received/borrowed from)
+    "vaangiten", "vaangina", "vaanginen", "vaaninen",
+]
+LEDGER_SETTLE = [
+    "settled", "cleared", "closed", "wrote off",
+    # Tanglish: account close pannitten / settle pannitten (closed/settled account)
+    "account close pannitten", "account close pannina",
+    "settle pannitten", "settle pannina",
+    "close pannitten", "close pannina",
+]
+
+# Postpositional Tanglish patterns:
+#   <person> kitta <amount> vaangiten   → received from <person> → add_debt
+#   <person> kitta <amount> vasooli pannita → collected from <person> → collect_credit
+#   <person> ku <amount> kudutiten      → gave to <person> → add_credit
+#   <person> ku <amount> kasu kudutiten → gave money to <person> → add_credit
+#   <person> account close pannitten    → settled with <person> → settle
+#   <person> ku settle pannitten        → settled with <person> → settle
+TANGLISH_LEDGER_PATTERNS = [
+    # (regex, action) — first capture group must be person, second must be amount
+    (re.compile(r"(\S+)\s+kitta\s+(.+?)\s+(?:vasooli\s+pann(?:ita|iten|inen))", re.IGNORECASE), "collect_credit"),
+    (re.compile(r"(\S+)\s+kitta\s+(.+?)\s+(?:vaang(?:iten|ina|inen))", re.IGNORECASE), "add_debt"),
+    (re.compile(r"(\S+)\s+kitta\s+(.+?)\s+(?:bakki\s+kudut(?:iten|ten|hen))", re.IGNORECASE), "repay_debt"),
+    (re.compile(r"(\S+)\s+ku\s+(?:kasu\s+)?(.+?)\s+(?:kudut(?:iten|ten|hen))", re.IGNORECASE), "add_credit"),
+    (re.compile(r"(\S+)\s+(?:account\s+)?close\s+pann(?:itten|ina)", re.IGNORECASE), "settle"),
+    (re.compile(r"(\S+)\s+ku\s+settle\s+pann(?:itten|ina)", re.IGNORECASE), "settle"),
+]
 
 
 def parse_ledger_write(body: str, today: date) -> dict:
@@ -804,6 +1185,106 @@ def parse_single_ledger(text: str, fallback_date: date):
     rec_date = per_record_date or fallback_date
     lower = cleaned.lower()
 
+    # V2: Tanglish positional patterns try FIRST. They unambiguously
+    # encode person, amount, and direction in one shot.
+    for pat, action in TANGLISH_LEDGER_PATTERNS:
+        m = pat.search(cleaned)
+        if m:
+            person = titleish(m.group(1))
+            if action == "settle":
+                return ledger_record(person, "settle", None, rec_date), False
+            amt = parse_amount(m.group(2))
+            if amt is None:
+                continue
+            return ledger_record(person, action, amt, rec_date), False
+
+    # V2: `<person> took <amt> from me` → add_credit (they took = I gave)
+    m = re.search(r"(\S+)\s+took\s+(.+?)\s+from\s+me\b", cleaned, re.IGNORECASE)
+    if m:
+        person = titleish(m.group(1))
+        amt = parse_amount(m.group(2))
+        if amt is not None:
+            return ledger_record(person, "add_credit", amt, rec_date), False
+
+    # V2: `took <amt> from <person>` (no subject) → add_debt
+    m = re.search(r"\btook\s+(.+?)\s+from\s+(\S+)\b", cleaned, re.IGNORECASE)
+    if m:
+        amt = parse_amount(m.group(1))
+        person = titleish(m.group(2))
+        if amt is not None:
+            return ledger_record(person, "add_debt", amt, rec_date), False
+
+    # V2 Tanglish: `<person> ku <amt> kudukanum` → add_credit
+    m = re.search(r"(\S+)\s+ku\s+(.+?)\s+kudukanum\b", cleaned, re.IGNORECASE)
+    if m:
+        person = titleish(m.group(1))
+        amt = parse_amount(m.group(2))
+        if amt is not None:
+            return ledger_record(person, "add_credit", amt, rec_date), False
+
+    # V2: `I paid <person> back <amount>` → repay_debt
+    m = re.search(r"\bi\s+paid\s+(\S+)\s+back\s+(.+)", cleaned, re.IGNORECASE)
+    if m:
+        person = titleish(m.group(1))
+        amt = parse_amount(m.group(2))
+        if amt is not None:
+            return ledger_record(person, "repay_debt", amt, rec_date), False
+
+    # V2: `paid <person> back <amount>` (no `I` subject) → repay_debt
+    m = re.search(r"\bpaid\s+(\S+)\s+back\s+(.+)", cleaned, re.IGNORECASE)
+    if m:
+        person = titleish(m.group(1))
+        amt = parse_amount(m.group(2))
+        if amt is not None:
+            return ledger_record(person, "repay_debt", amt, rec_date), False
+
+    # V2: `collected <amount> from <person>` → collect_credit
+    m = re.search(r"\bcollected\s+(.+?)\s+from\s+(\S+)", cleaned, re.IGNORECASE)
+    if m:
+        amt = parse_amount(m.group(1))
+        person = titleish(m.group(2))
+        if amt is not None:
+            return ledger_record(person, "collect_credit", amt, rec_date), False
+
+    # V2: `done with <person>` → settle
+    m = re.search(r"\bdone\s+with\s+(\S+)", cleaned, re.IGNORECASE)
+    if m:
+        return ledger_record(titleish(m.group(1)), "settle", None, rec_date), False
+
+    # V2 Tanglish: `<person> ku full kasu kudutiten` → repay_debt (no amount)
+    m = re.search(r"(\S+)\s+ku\s+full\s+kasu\s+kudut", cleaned, re.IGNORECASE)
+    if m:
+        return ledger_record(titleish(m.group(1)), "repay_debt", None, rec_date), False
+
+    # V2 Tanglish: `<person> ku <amount> bakki` → add_debt
+    # (Tanglish: "<amount> remaining/owed to <person>")
+    m = re.search(r"(\S+)\s+ku\s+(.+?)\s+bakki\b", cleaned, re.IGNORECASE)
+    if m:
+        person = titleish(m.group(1))
+        amt = parse_amount(m.group(2))
+        if amt is not None:
+            return ledger_record(person, "add_debt", amt, rec_date), False
+
+    # V2: `<person> paid me back fully` (no amount) → settle
+    if re.search(r"\bpaid\s+me\s+back\s+fully\b", cleaned, re.IGNORECASE):
+        # Person token is the first word before "paid me back"
+        before = cleaned[:cleaned.lower().find("paid me back")].strip()
+        person = before.split()[-1] if before else None
+        if person:
+            return ledger_record(titleish(person), "settle", None, rec_date), False
+
+    # V2: `paid back <person> fully` → settle
+    m = re.search(r"\bpaid\s+back\s+(\S+)\s+fully\b", cleaned, re.IGNORECASE)
+    if m:
+        return ledger_record(titleish(m.group(1)), "settle", None, rec_date), False
+
+    # V2: `settled <amount> to <person>` → repay_debt
+    m = re.search(r"\bsettled\s+(.+?)\s+to\s+(\S+)\b", cleaned, re.IGNORECASE)
+    if m:
+        amt = parse_amount(m.group(1))
+        if amt is not None:
+            return ledger_record(titleish(m.group(2)), "repay_debt", amt, rec_date), False
+
     # X owes me <amt>
     m = re.search(r"(\S+)\s+owes?\s+me\s+(.+)", cleaned, re.IGNORECASE)
     if m:
@@ -822,7 +1303,7 @@ def parse_single_ledger(text: str, fallback_date: date):
             return None
         return ledger_record(person, "add_debt", amt, rec_date), False
 
-    # settle / close
+    # settle / close (English keywords + remaining Tanglish settle phrasings)
     for kw in LEDGER_SETTLE:
         idx = lower.find(kw)
         if idx >= 0:
@@ -862,14 +1343,12 @@ def parse_single_ledger(text: str, fallback_date: date):
                 return None
             return ledger_record(res[0], "add_debt", res[1], rec_date), False
 
-    # Ambiguous: <person> <amt> with no direction marker.
-    parts = cleaned.split()
-    if len(parts) >= 2:
-        am = AMOUNT_RE.search(cleaned)
-        if am:
-            amt = parse_amount(am.group(0))
-            if amt is not None:
-                return ledger_record(titleish(parts[0]), "add_credit", amt, rec_date), True
+    # V2: bare `<person> <amount>` with no action verb → reject (matches
+    # dataset gold: `Badri 4295` returns disposition=reject, not confirm).
+    # The ambiguous-direction path is reserved for inputs that DO have
+    # a verb but the direction is unclear (e.g. `gave Yusuf 613.81`
+    # without an `I` subject — still triggers an LEDGER_ADD_CREDIT match
+    # earlier and returns accept).
     return None
 
 
@@ -1050,19 +1529,100 @@ def query_expense(residual, date_range, today):
     #   - list intent without date → leave null (dataset uses null often)
     rng = date_range or (this_month(today) if intent == "total" else None)
 
-    # Filter: description-text inference for `<noun> spending` /
-    # `<noun> expense` / `expense on <noun>` patterns. Only fires when
-    # exactly one item-shaped phrase is present.
+    # V2: filter inference for expense queries.
+    KNOWN_EXPENSE_GROUPS = {
+        "groceries", "transport", "dining", "bills_utilities", "recharge_subscription",
+        "household", "health", "personal_care", "education", "work", "entertainment",
+        "travel", "vehicle", "shopping", "other",
+    }
+    group_filter = None
     desc_filter = None
-    m = re.search(r"\b(?:on|for)\s+([a-z][a-z\s]{2,}?)\s+(?:current month|this month|last month|today|yesterday|$)", t)
-    if m:
-        desc_filter = m.group(1).strip()
+    exclude_group_filter = None
+    exclude_desc_filter = None
+
+    # Exclusion: `apart from X` / `other than X` / `excluding X` / `except X`
+    excl_m = re.search(
+        r"\b(?:other\s+than|apart\s+from|excluding|except)\s+(.+?)(?:\s*$|\s+(?:this|last|current|next|today|yesterday))",
+        t,
+    )
+    excl_residual = t
+    if excl_m:
+        cand = excl_m.group(1).strip().rstrip(",.:;")
+        if cand:
+            if cand in KNOWN_EXPENSE_GROUPS:
+                exclude_group_filter = cand
+            else:
+                exclude_desc_filter = cand
+        # Remove the exclusion phrase from residual for downstream parsing.
+        excl_residual = t[: excl_m.start()] + t[excl_m.end():]
+
+    # V2: explicit-pattern filter extraction. Only fires when the input
+    # clearly anchors a filter (`<noun> spending`, `spent on <noun>`,
+    # `<noun> expense <date>`, etc.) — generic queries like `total
+    # expense this month` should NOT get a description filter.
+    if not exclude_group_filter and not exclude_desc_filter:
+        # Strip chip-prefix and stop words to build the searchable body.
+        body = re.sub(r"^\s*expense\s*:\s*", " ", excl_residual, flags=re.IGNORECASE).strip()
+
+        # Pattern A: `<noun> spending` / `<noun> spend` / `<noun> cost(s)?`
+        m = re.search(
+            r"^(.+?)\s+(?:spending|spend|costs?|expense)\s*$",
+            body, re.IGNORECASE,
+        )
+        # Pattern B: `spent on <noun>` / `spend on <noun>` / `spending on <noun>`
+        if m is None:
+            m = re.search(
+                r"\b(?:spent|spend|spending)\s+on\s+(.+?)\s*$",
+                body, re.IGNORECASE,
+            )
+        # Pattern C: `<noun> expense <date>` / `<noun> spending <date>`
+        # (date phrase already extracted, so body might just be `<noun>
+        # expense`)
+        if m is None:
+            m = re.search(
+                r"^(?:show\s+(?:me|my)?\s*|give\s+me\s+|tell\s+me\s+)?"
+                r"(.+?)\s+(?:expense|spending)\s*$",
+                body, re.IGNORECASE,
+            )
+        # Pattern D: `<group/item> expense` followed by `for/this/last <date>`
+        if m is None:
+            m = re.search(
+                r"\b(?:total\s+)?(.+?)\s+expense\b",
+                body, re.IGNORECASE,
+            )
+        if m:
+            cand = m.group(1).strip().rstrip(",.:;-")
+            # Drop leading framing words.
+            cand = re.sub(
+                r"^(?:show|give|tell|my|me|i|the|all|every|of|"
+                r"how\s+much|how\s+many|total|tally\s+up|tally|"
+                r"current\s+month|this\s+month|last\s+month|today|"
+                r"yesterday|tomorrow|next|last|this|current)\s+",
+                "", cand, flags=re.IGNORECASE,
+            ).strip()
+            # Reject obvious noise.
+            STOP = {
+                "what", "what's", "whats", "how", "did", "do", "i", "me", "my",
+                "the", "a", "an", "and", "or", "for", "from", "in", "of", "on",
+                "to", "this", "last", "next", "current", "history", "list",
+                "total", "summary", "tally", "show", "give", "tell", "me",
+                "expense", "expenses", "spending", "spend", "cost", "costs",
+                "month", "week", "year", "yesterday", "today", "tomorrow", "now",
+            }
+            tokens = cand.lower().split()
+            non_stop_tokens = [w for w in tokens if w not in STOP and not w.isdigit() and len(w) > 1]
+            # Require at least one substantive token AND total length ≥ 3.
+            if non_stop_tokens and len(cand) >= 3 and len(tokens) <= 6:
+                if cand.lower() in KNOWN_EXPENSE_GROUPS:
+                    group_filter = cand.lower()
+                else:
+                    desc_filter = cand
 
     filters = {
-        "group": None,
+        "group": group_filter,
         "description_text": desc_filter,
-        "exclude_group": None,
-        "exclude_description_text": None,
+        "exclude_group": exclude_group_filter,
+        "exclude_description_text": exclude_desc_filter,
     }
     return accept_query(
         "expense", intent,
@@ -1072,7 +1632,7 @@ def query_expense(residual, date_range, today):
     )
 
 
-def query_buy(residual):
+def query_buy(residual, date_range=None):
     """
     V1.1.2: search vs list distinguished by item-anchor detection.
     Search fires when the residual mentions an item with one of:
@@ -1128,7 +1688,12 @@ def query_buy(residual):
         "status": "open" if intent == "list" else None,
         "item_text": item_text,
     }
-    return accept_query("buy", intent, None, None, filters, None, None)
+    return accept_query(
+        "buy", intent,
+        date_range.start.isoformat() if date_range else None,
+        date_range.end.isoformat() if date_range else None,
+        filters, None, None,
+    )
 
 
 def query_todo(residual, date_range, today):
@@ -1146,15 +1711,19 @@ def query_todo(residual, date_range, today):
     t = residual.lower()
     text_match = None
     search_patterns = [
-        # `<noun> on my list`
-        r"^(.+?)\s+on\s+my\s+list\s*$",
+        # V2: order specific patterns first so `find X on my list` extracts
+        # `X` not `find X`.
         # `find <noun> on my list` / `find <noun>`
         r"\b(?:find|look\s+up|locate)\s+(.+?)(?:\s+on\s+my\s+list)?\s*$",
+        # `is <noun> on my list`
+        r"\bis\s+(.+?)\s+on\s+my\s+list\s*$",
         # `search my todos for <noun>`
         r"\bsearch\s+my\s+todos?\s+for\s+(.+?)\s*$",
+        # `<noun> on my list`
+        r"^(.+?)\s+on\s+my\s+list\s*$",
         # `remind <noun> on my list`
         r"^remind\s+(.+?)\s+on\s+my\s+list\s*$",
-        # `do i have <noun> (pending|todo)?` (used as todo:search in dataset)
+        # `do i have <noun> (pending|todo)?`
         r"\bdo\s+i\s+have\s+(.+?)\s+(?:pending|todo|task)\s*$",
     ]
     for pat in search_patterns:
@@ -1166,17 +1735,23 @@ def query_todo(residual, date_range, today):
                 text_match = cand
                 break
 
-    is_done_query = bool(re.search(r"\b(done|finished|completed)\b", t))
+    # V2: `finish` / `complete` (without -ed) also count as done queries.
+    is_done_query = bool(re.search(r"\b(done|finish(?:ed)?|complet(?:e|ed))\b", t))
     is_history = (
         re.search(r"\bhistory\b", t)
         and not text_match
     )
+    # V2: `every/all/full todo(s)` → status=None (asking for the FULL list).
+    is_all_query = bool(re.search(r"\b(every|all|full)\s+(?:todos?|tasks?|to\s*do)\b", t))
 
     if text_match:
         intent = "search"
         status = None
     elif is_history:
         intent = "history"
+        status = None
+    elif is_all_query:
+        intent = "list"
         status = None
     else:
         intent = "list"
@@ -1192,18 +1767,43 @@ def query_todo(residual, date_range, today):
     )
 
 
-def query_weight(residual, original_text):
+def query_weight(residual, original_text, date_range=None, today=None):
+    """
+    V2: history intent over-predicted as `latest` in V1.1 — 1010 rows
+    of `pred='latest' vs gold='history'`. The dataset uses `history`
+    for:
+      - explicit log/readings: `weight log`, `weight readings`,
+        `pull up my weight log`, `weight history`
+      - past-date references: `<person> weight from last friday`,
+        `last sunday my weight`, `what was X weight on last monday`
+      - change-over-time framings: `show me how my weight has
+        changed`, `weight has changed`
+    """
     t = residual.lower()
-    if re.search(r"\b(everyone|all|family)\b", t):
+    has_past_date_marker = bool(re.search(
+        r"\b(last|previous|yesterday|nethu|pona)\b\s+(monday|tuesday|wednesday|thursday|friday|saturday|sunday|week|month|year|maasam|varusham)",
+        t,
+    )) or bool(re.search(r"\bfrom\s+last\b", t)) or bool(re.search(r"\bon\s+last\b", t))
+    # History markers: PLURAL `readings`/`logs`/`records` only;
+    # `weight log` (preceded by `weight`) but not bare `log` (verb form).
+    has_history_log = bool(re.search(r"\b(weight\s+log|weight\s+logs|readings|records|recordings)\b", t))
+    has_history_word = bool(re.search(r"\bhistory\b", t))
+    has_changed_phrasing = bool(re.search(r"\bhas\s+changed\b|how\s+.+\s+changed\b", t))
+    has_trend = bool(re.search(r"\btrend\b", t))
+    has_change_only = bool(re.search(r"\bchange\b", t)) and not has_changed_phrasing
+    has_all = bool(re.search(r"\b(everyone|all|family)\b", t))
+
+    if has_all:
         intent = "latest_all"
-    elif re.search(r"\bhistory\b", t):
+    elif has_history_log or has_history_word or has_past_date_marker or has_changed_phrasing:
         intent = "history"
-    elif re.search(r"\btrend\b", t):
+    elif has_trend:
         intent = "trend"
-    elif re.search(r"\bchange\b", t):
+    elif has_change_only:
         intent = "change"
     else:
         intent = "latest"
+
     person_hint = extract_person_from_query(original_text)
     if person_hint is None:
         if re.search(r"\b(my|me|i)\b", t):
@@ -1213,10 +1813,29 @@ def query_weight(residual, original_text):
         else:
             person_hint = "self"
     filters = {"person_text": person_hint}
-    return accept_query("weight", intent, None, None, filters, None, None)
+    # V2: weight history/trend/change defaults to a 6-month window
+    # ending at anchor when no explicit range is given. Dataset uses
+    # this convention across hundreds of `weight log` / `weight trend`
+    # / `weight readings` / `weight has changed` rows.
+    if date_range is None and intent in ("history", "trend", "change") and today is not None:
+        y, mth = today.year, today.month - 6
+        while mth <= 0:
+            y -= 1
+            mth += 12
+        try:
+            start = today.replace(year=y, month=mth)
+        except ValueError:
+            start = today.replace(year=y, month=mth, day=28)
+        date_range = DateRange(start, today)
+    return accept_query(
+        "weight", intent,
+        date_range.start.isoformat() if date_range else None,
+        date_range.end.isoformat() if date_range else None,
+        filters, None, None,
+    )
 
 
-def query_ledger(residual, original_text):
+def query_ledger(residual, original_text, date_range=None):
     """
     V1.1 intent priority:
       1. Person-specific lookup → `balance` (when "balance" / "owe" /
@@ -1266,16 +1885,29 @@ def query_ledger(residual, original_text):
     else:
         perspective = None
 
-    filters = {"person_text": person_hint, "perspective": perspective, "status": "open"}
-    return accept_query("ledger", intent, None, None, filters, limit, None)
+    # V2: status filter only when intent is summary/balance. For
+    # `list` intent (recent/history/transactions), the dataset uses
+    # status=None (all entries, not just open ones).
+    status_filter = "open" if intent in ("summary", "balance") else None
+    filters = {"person_text": person_hint, "perspective": perspective, "status": status_filter}
+    return accept_query(
+        "ledger", intent,
+        date_range.start.isoformat() if date_range else None,
+        date_range.end.isoformat() if date_range else None,
+        filters, limit, None,
+    )
 
 
 def query_note(residual, date_range, original_text):
     """
-    V1.1: when a date range is present, default intent to `list`. Search
-    intent only fires when there's a topic anchor (the residual text
-    after stripping framing words has body) AND no date range is set.
-    `latest` requires the explicit word.
+    V2: query_text extraction uses POSITIVE patterns (regex with a
+    topic-anchor capture group) instead of the V1.1 subtractive
+    framing-word stripper which over-stripped and under-stripped.
+
+    Intent rules:
+      - `latest` / `most recent` → latest
+      - date_range present → list
+      - otherwise → search (with topic extracted positively)
     """
     t = residual.lower()
     if re.search(r"\b(latest|most recent)\b", t):
@@ -1284,22 +1916,67 @@ def query_note(residual, date_range, original_text):
         intent = "list"
     else:
         intent = "search"
+
+    search_text = None
     if intent == "search":
-        # Extract a topic anchor: drop the framing words plus the chip
-        # prefix (`note: any mention of X` → `X`). Preserve case for
-        # better retrieval downstream.
-        cleaned = re.sub(r"^\s*ask\s*:\s*", "", original_text, flags=re.IGNORECASE)
-        cleaned = re.sub(r"^\s*note\s*:\s*", "", cleaned, flags=re.IGNORECASE)
-        cleaned = re.sub(
-            r"\b(any\s+mention\s+of|any\s+notes?\s+about|find|look\s+up|"
-            r"search\s+(?:my\s+)?notes?\s+for|did\s+i\s+note\s+anything\s+about|"
-            r"have\s+i\s+noted\s+anything\s+about|in\s+my\s+notes?|notes?|about|saved|"
-            r"the|of|pathi\s+notes?\s+irukka|notes?\s+la|irukka)\b",
-            "", cleaned, flags=re.IGNORECASE,
-        )
-        search_text = re.sub(r"\s+", " ", cleaned).strip() or None
-    else:
-        search_text = None
+        # Strip chip prefixes from the original input first so capture
+        # groups don't include them.
+        body = re.sub(r"^\s*ask\s*:\s*", "", original_text, flags=re.IGNORECASE)
+        body = re.sub(r"^\s*note\s*:\s*", "", body, flags=re.IGNORECASE)
+        body = body.strip()
+
+        # Positive patterns. Order matters: longer/more specific first.
+        # Each capture group becomes the topic.
+        patterns = [
+            # `notes la <X> irukka`  (Tanglish: "is there <X> in notes")
+            r"^notes?\s+la\s+(.+?)\s+irukka\s*$",
+            # `<X> pathi notes? irukka`  (Tanglish: "any notes about <X>")
+            r"^(.+?)\s+pathi\s+notes?\s+irukka\s*$",
+            # `<X> mentions in notes?` / `<X> mentions in my notes?`
+            r"^(.+?)\s+mentions?\s+in\s+(?:my\s+)?notes?\s*$",
+            # `any mention of <X> in (my )? notes?`
+            r"\bany\s+mention\s+of\s+(.+?)\s+in\s+(?:my\s+)?notes?\s*$",
+            # `any mention of <X>` (with optional `in notes` later)
+            r"\bany\s+mention\s+of\s+(.+?)$",
+            # `any notes? about <X>`
+            r"\bany\s+notes?\s+about\s+(.+?)$",
+            # `have i noted anything about <X>`
+            r"\bhave\s+i\s+noted\s+anything\s+about\s+(.+?)$",
+            # `did i note anything about <X>`
+            r"\bdid\s+i\s+note\s+anything\s+about\s+(.+?)$",
+            # `what did i write about <X>`
+            r"\bwhat\s+did\s+i\s+(?:write|note|jot)\s+(?:down\s+)?about\s+(.+?)$",
+            # `find <X> in my notes`
+            r"\bfind\s+(.+?)\s+in\s+(?:my\s+)?notes?\s*$",
+            # `look up <X> in my notes`
+            r"\blook\s+up\s+(.+?)\s+in\s+(?:my\s+)?notes?\s*$",
+            # `search my notes? for <X>`
+            r"\bsearch\s+(?:my\s+)?notes?\s+for\s+(.+?)$",
+            # `show my notes? about <X>` / `show notes? about <X>`
+            r"\bshow\s+(?:my\s+)?notes?\s+about\s+(.+?)$",
+            # `note snippets about <X>` / `snippets about <X>`
+            r"\b(?:note\s+)?snippets\s+(?:about\s+)?(.+?)$",
+            # `notes mentioning <X>` / `note mentioning <X>`
+            r"\bnotes?\s+mentioning\s+(.+?)$",
+            # `pull notes? (related to|about) <X>`
+            r"\bpull\s+notes?\s+(?:related\s+to|about|on)\s+(.+?)$",
+            # `<X> notes?`  (e.g. `kitchen exhaust cleaning notes`)
+            r"^(.+?)\s+notes?\s*$",
+            # Fallback: whatever's left after stripping `notes`
+            r"^(.+?)$",
+        ]
+        for pat in patterns:
+            m = re.search(pat, body, re.IGNORECASE)
+            if m:
+                cand = m.group(1).strip()
+                # Strip lingering framing words at the edges.
+                cand = re.sub(r"^(?:my\s+|the\s+|a\s+|an\s+)", "", cand, flags=re.IGNORECASE)
+                cand = re.sub(r"\s+(?:in|on|about|for|the)\s*$", "", cand, flags=re.IGNORECASE)
+                cand = cand.strip().rstrip(",.:;")
+                if cand and cand.lower() not in {"notes", "note", "the", "of", "in", "on"}:
+                    search_text = cand
+                    break
+
     return accept_query(
         "note", intent,
         date_range.start.isoformat() if date_range else None,
@@ -1329,19 +2006,25 @@ def parse_query(body: str, today: date) -> dict:
     text = body.strip()
     lower = text.lower()
     date_range, residual = extract_date_range_phrase(lower, today)
+    # V2: fall back to "anywhere" date detection if the canonical phrase
+    # pass didn't find one. Date_range queries fail at high volume in
+    # V1.1 because phrases like `on monday` / `since last week` / etc.
+    # need the broader scanner.
+    if date_range is None:
+        date_range = find_date_range_anywhere(lower, today)
     domain = detect_domain(residual or lower)
     if domain is None:
         return reject_query("manual_unrecognized")
     if domain == "expense":
         return query_expense(residual, date_range, today)
     if domain == "buy":
-        return query_buy(residual)
+        return query_buy(residual, date_range)
     if domain == "todo":
         return query_todo(residual, date_range, today)
     if domain == "weight":
-        return query_weight(residual, text)
+        return query_weight(residual, text, date_range, today)
     if domain == "ledger":
-        return query_ledger(residual, text)
+        return query_ledger(residual, text, date_range)
     if domain == "note":
         return query_note(residual, date_range, text)
     return reject_query("manual_unrecognized")
