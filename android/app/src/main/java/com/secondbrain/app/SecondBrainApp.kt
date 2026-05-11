@@ -6,8 +6,21 @@ import com.secondbrain.app.diag.EventLog
 import kotlin.system.exitProcess
 
 class SecondBrainApp : Application() {
+    companion object {
+        /**
+         * Process-wide application context for code paths that need to
+         * touch app resources (asset loading, getExternalFilesDir, etc.)
+         * without plumbing a Context through call chains. Set once in
+         * onCreate. Lateinit on Application is safe because Application
+         * is constructed before any Activity / Service.
+         */
+        lateinit var appContext: android.content.Context
+            private set
+    }
+
     override fun onCreate() {
         super.onCreate()
+        appContext = applicationContext
         DatabaseHolder.init(this)
         EventLog.bindExternalDir(this)
         EventLog.info(EventLog.Category.APP, "Application.onCreate")
