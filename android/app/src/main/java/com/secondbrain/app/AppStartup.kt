@@ -43,9 +43,17 @@ object AppStartup {
     }
 
     private suspend fun autoLoadLlm(modelDir: File) {
+        // Manual mode: rules engine, no GGUF needed. Skip the load entirely
+        // so we don't spend ~5 s of cold-start on a model the user has
+        // explicitly chosen not to use.
+        val db = DatabaseHolder.get()
+        if (ModelRegistry.isManualSelected(db)) {
+            AppStatusBus.emit("Manual parser active — no LLM load needed.")
+            return
+        }
         // Discover GGUFs and pick the user's selection (or first found).
         // Supports running 1.7B and 0.6B side-by-side for A/B comparison.
-        val gguf = ModelRegistry.resolveSelected(DatabaseHolder.get(), modelDir)
+        val gguf = ModelRegistry.resolveSelected(db, modelDir)
         if (gguf == null) {
             AppStatusBus.emit("Model file not found — open Settings to import.")
             return

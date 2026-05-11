@@ -77,9 +77,16 @@ class SettingsViewModel : ViewModel() {
      */
     fun refreshAvailableModels(modelDir: File) = viewModelScope.launch {
         val (available, selected) = withContext(Dispatchers.IO) {
-            val files = ModelRegistry.discover(modelDir)
-            val active = ModelRegistry.resolveSelected(DatabaseHolder.get(), modelDir)
-            files.map { it.name } to active?.name
+            val db = DatabaseHolder.get()
+            val names = ModelRegistry.discoverNames(modelDir)
+            val saved = ModelRegistry.getSelectedFilename(db)
+            // If Manual is persisted, surface it. Otherwise resolve a
+            // GGUF as before.
+            val activeName = when {
+                saved == ModelRegistry.MANUAL_SENTINEL -> ModelRegistry.MANUAL_SENTINEL
+                else -> ModelRegistry.resolveSelected(db, modelDir)?.name
+            }
+            names to activeName
         }
         _s.update { it.copy(availableModels = available, selectedModel = selected) }
     }
@@ -90,6 +97,24 @@ class SettingsViewModel : ViewModel() {
      * new one. The Settings UI re-syncs from runtime singletons after.
      */
     fun selectModel(modelDir: File, filename: String) = viewModelScope.launch {
+        // Manual sentinel: no GGUF to load, just persist the choice and
+        // unload any currently-loaded LLM so we don't waste RAM while the
+        // user dogfoods the rules engine.
+        if (filename == ModelRegistry.MANUAL_SENTINEL) {
+            withContext(Dispatchers.IO) {
+                ModelRegistry.setSelected(DatabaseHolder.get(), filename)
+            }
+            if (LlamaCpp.isLoaded()) LlamaCpp.forceUnload()
+            _s.update {
+                it.copy(
+                    selectedModel = filename,
+                    loaded = false,
+                    status = "Manual mode active — rules engine, no LLM.",
+                )
+            }
+            refreshAvailableModels(modelDir)
+            return@launch
+        }
         val target = File(modelDir, filename)
         if (!target.exists()) {
             _s.update { it.copy(status = "File missing: $filename") }
@@ -462,6 +487,7 @@ fun SettingsScreen(vm: SettingsViewModel = viewModel()) {
             )
             state.availableModels.forEach { name ->
                 val isActive = name == state.selectedModel
+                val isManual = name == ModelRegistry.MANUAL_SENTINEL
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
@@ -474,10 +500,24 @@ fun SettingsScreen(vm: SettingsViewModel = viewModel()) {
                         },
                     )
                     Column(Modifier.weight(1f)) {
-                        Text(name, style = MaterialTheme.typography.bodyMedium)
+                        Text(
+                            if (isManual)
+                                com.secondbrain.app.parser.ManualParser.DISPLAY_NAME
+                            else name,
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
                         if (isActive) {
                             Text(
-                                if (state.loaded) "active · loaded" else "active · not loaded",
+                                when {
+                                    isManual -> "active · rules engine"
+                                    state.loaded -> "active · loaded"
+                                    else -> "active · not loaded"
+                                },
+                                style = MaterialTheme.typography.labelSmall,
+                            )
+                        } else if (isManual) {
+                            Text(
+                                "deterministic, ~50ms, no model RAM",
                                 style = MaterialTheme.typography.labelSmall,
                             )
                         }

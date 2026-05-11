@@ -2,6 +2,8 @@ package com.secondbrain.app.parser
 
 import com.secondbrain.app.ChatTemplate
 import com.secondbrain.app.LlamaCpp
+import com.secondbrain.app.data.DatabaseHolder
+import com.secondbrain.app.data.ModelRegistry
 
 /**
  * Wraps the LLM call with prompt construction + schema validation.
@@ -37,6 +39,27 @@ object ParserService {
      *   when records-per-row was capped at 3.
      */
     suspend fun parse(userInput: String, maxTokens: Int = 512): ParseAttempt {
+        // Manual mode short-circuits: no prompt build, no GGUF call, no
+        // ShapeAdapter pass. ManualParser already returns a validated
+        // ParseResult.Ok directly, so we wrap it in a synthetic
+        // ParseAttempt with prompt/raw set to debugging-friendly markers
+        // so request_log entries stay meaningful.
+        if (ModelRegistry.isManualSelected(DatabaseHolder.get())) {
+            val tStart = System.nanoTime()
+            val result = ManualParser.parse(userInput)
+            val ms = (System.nanoTime() - tStart) / 1_000_000
+            val rawJson = (result as? ParseResult.Ok)?.payload?.raw?.toString()
+                ?: (result as? ParseResult.Fail)?.rawText
+                ?: "{}"
+            return ParseAttempt(
+                prompt = "(manual: $userInput)",
+                rawOutput = rawJson,
+                result = result,
+                promptMs = 0,
+                generateMs = ms,
+                nativeStats = "{\"backend\":\"manual\",\"elapsed_ms\":$ms}",
+            )
+        }
         val tStart = System.nanoTime()
         val prompt = ChatTemplate.buildPrompt(userInput)
         val tAfterPrompt = System.nanoTime()

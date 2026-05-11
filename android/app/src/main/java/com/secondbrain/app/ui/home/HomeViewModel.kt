@@ -214,7 +214,12 @@ class HomeViewModel : ViewModel() {
         val s = _state.value
         if (s.input.isBlank()) return
         val tagged = Tags.normalize(s.input.trim(), s.chips)
-        val needsLlm = tagged.activeChips.isNotEmpty() &&
+        // Manual mode runs the rules engine in-process — no GGUF required,
+        // so the load-state gate doesn't apply. Note bypass also doesn't
+        // need the LLM. Everything else needs a loaded GGUF.
+        val manualActive = com.secondbrain.app.data.ModelRegistry
+            .isManualSelected(com.secondbrain.app.data.DatabaseHolder.get())
+        val needsLlm = !manualActive && tagged.activeChips.isNotEmpty() &&
                 !(tagged.activeChips.size == 1 && Tag.NOTE in tagged.activeChips)
         if (needsLlm && !LlamaCpp.isLoaded()) {
             AppStatusBus.emit("Model not loaded yet — waiting for auto-load.")
@@ -257,8 +262,12 @@ class HomeViewModel : ViewModel() {
 
             // On recovery after a process kill, the model may not be loaded yet.
             // Wait up to 60 s for it before proceeding. Notes bypass the LLM
-            // entirely so they don't need to wait.
-            val needsLlm = next.chips.isNotEmpty() &&
+            // entirely so they don't need to wait. Manual mode also bypasses
+            // the LLM so don't sit idle waiting for a load that will never
+            // happen.
+            val manualActive = com.secondbrain.app.data.ModelRegistry
+                .isManualSelected(com.secondbrain.app.data.DatabaseHolder.get())
+            val needsLlm = !manualActive && next.chips.isNotEmpty() &&
                     !(next.chips.size == 1 && Tag.NOTE in next.chips)
             if (needsLlm && !LlamaCpp.isLoaded()) {
                 AppStatusBus.emit("Resuming: waiting for model to load…")
