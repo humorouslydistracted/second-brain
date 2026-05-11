@@ -8,6 +8,7 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -18,7 +19,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.focus.FocusManager
 import androidx.compose.ui.platform.LocalClipboardManager
+import androidx.compose.ui.platform.LocalFocusManager
+import androidx.compose.ui.platform.LocalSoftwareKeyboardController
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -42,6 +46,16 @@ fun HomeScreen(navController: NavHostController? = null, vm: HomeViewModel = vie
     val state by vm.state.collectAsState()
     val clipboard = LocalClipboardManager.current
     val scope = rememberCoroutineScope()
+    // Used to drop the soft keyboard + clear text-field focus on Send so
+    // the user can immediately see the pending bubble + processing state
+    // without having to manually dismiss the IME.
+    val keyboardController = LocalSoftwareKeyboardController.current
+    val focusManager: FocusManager = LocalFocusManager.current
+    // The recent-feed list state is hoisted so we can auto-scroll to the
+    // top whenever a new pending item is appended. Pending bubbles are
+    // rendered FIRST in the LazyColumn, so scrolling to index 0 puts the
+    // freshly-queued submission directly in view.
+    val recentListState = rememberLazyListState()
 
     LaunchedEffect(state.notices) {
         val notices = vm.consumeNotices()
@@ -54,6 +68,18 @@ fun HomeScreen(navController: NavHostController? = null, vm: HomeViewModel = vie
         }
     }
 
+    // Auto-scroll-to-top whenever the pending count grows. Tracks size
+    // via a remembered snapshot so a status flip (QUEUED → PROCESSING →
+    // DONE) on the same item doesn't re-trigger the scroll.
+    var lastPendingCount by remember { mutableStateOf(0) }
+    LaunchedEffect(state.pending.size) {
+        val now = state.pending.size
+        if (now > lastPendingCount) {
+            try { recentListState.animateScrollToItem(0) } catch (_: Throwable) {}
+        }
+        lastPendingCount = now
+    }
+
     val processingItem = state.pending.firstOrNull { it.status == PendingStatus.PROCESSING }
 
     Scaffold(
@@ -64,7 +90,15 @@ fun HomeScreen(navController: NavHostController? = null, vm: HomeViewModel = vie
                 isProcessing = processingItem != null,
                 onChipTap = vm::onChipTap,
                 onInputChanged = vm::onInputChanged,
-                onSend = vm::onSend,
+                onSend = {
+                    // Drop the IME + focus FIRST so the visible viewport
+                    // expands before the pending bubble is appended. If
+                    // we hid the keyboard after onSend, the relayout
+                    // would race with the scroll-to-top below.
+                    keyboardController?.hide()
+                    focusManager.clearFocus(force = true)
+                    vm.onSend()
+                },
                 onCancel = vm::cancelCurrent,
                 onCopyLogs = {
                     scope.launch {
@@ -108,6 +142,7 @@ fun HomeScreen(navController: NavHostController? = null, vm: HomeViewModel = vie
 
             // ── Scrollable section: pending + history ────────────────────────
             LazyColumn(
+                state = recentListState,
                 modifier = Modifier
                     .weight(1f)
                     .fillMaxWidth()
