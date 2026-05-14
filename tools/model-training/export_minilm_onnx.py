@@ -1,5 +1,5 @@
 """
-Local equivalent of `colab_export_minilm_onnx.ipynb`.
+Local equivalent of `colab/export_minilm_onnx.ipynb`.
 
 Run from PowerShell after activating the venv (see export_minilm_onnx_README.md):
     python export_minilm_onnx.py

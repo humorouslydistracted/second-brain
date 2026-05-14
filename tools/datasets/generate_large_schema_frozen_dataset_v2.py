@@ -5,7 +5,7 @@ Source of truth: docs/model-training.md.
 Schema reference: docs/model-training.md - "Shared Schema Freeze v2".
 Diversity rules: docs/model-training.md - "v2 Amendments".
 
-Differences from generate_large_schema_frozen_dataset.py (v1):
+Differences from the earlier v1 generator:
 - Multi-anchor: every row carries a top-level "anchor_date"; relative date
   phrases resolve relative to that row's anchor.
 - Harmonized intent vocabulary per docs/model-training.md Section 1.3.

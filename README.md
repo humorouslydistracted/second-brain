@@ -36,7 +36,7 @@ and history.
 - Self-name handling for "me", "my", and similar personal references.
 - Multi-model picker for parser GGUF files in the app's local model folder.
 - Training, conversion, evaluation, and dataset tooling for Qwen3 parser
-  experiments on Kaggle, Colab, or a local GPU machine.
+  experiments on Kaggle and Colab.
 
 ## Tech Stack
 
@@ -46,7 +46,7 @@ and history.
 | Runtime model | llama.cpp through JNI, Qwen3 parser GGUF files |
 | Embeddings | MiniLM ONNX through onnxruntime-android |
 | Storage | SQLite tables for notes, expenses, ledger, weights, todos, buy-list, people, embeddings, and logs |
-| Tooling | Python dataset generators, Kaggle/Colab fine-tuning notebooks, GGUF conversion notebooks |
+| Tooling | Python dataset generators, Kaggle/Colab fine-tuning, GGUF conversion notebooks |
 | Privacy | No account, no backend, no telemetry |
 
 ## Repository Layout
@@ -57,7 +57,9 @@ and history.
 |-- docs/                       # Public architecture and model notes
 |-- tools/
 |   |-- datasets/               # Synthetic data, eval, and manual parser tooling
-|   `-- model-training/         # Kaggle/Colab/local fine-tune + export tooling
+|   `-- model-training/         # Colab/Kaggle fine-tune + export tooling
+|       |-- colab/
+|       `-- kaggle/
 |-- prototypes/
 |   `-- flask-reference/        # Retired Python web prototype and regression tests
 |-- LICENSE
@@ -136,8 +138,8 @@ Second Brain is designed for private local data:
 - no cloud model API
 - user notes and structured records stay in the local SQLite database
 
-Kaggle, Colab, and local GPU scripts are optional development tools for building
-model artifacts. Runtime use is on-device.
+Kaggle and Colab scripts are optional development tools for building model
+artifacts. Runtime use is on-device.
 
 ## Status
 

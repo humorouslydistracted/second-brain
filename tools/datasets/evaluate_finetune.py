@@ -32,7 +32,7 @@ def parse_args():
     )
     parser.add_argument(
         "--dataset",
-        default="eval_finetune_dataset_v2_schema_frozen/heldout_cases.jsonl",
+        default="eval_finetune_dataset_v3_schema_frozen/heldout_cases.jsonl",
         help="Path to held-out eval dataset jsonl.",
     )
     parser.add_argument(

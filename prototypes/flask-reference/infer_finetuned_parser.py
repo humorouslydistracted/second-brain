@@ -4,21 +4,22 @@ Loads the LoRA adapter with the same chat template / system prompt that was
 used during training and evaluation, so behavior matches what the Colab eval
 already measured.
 
-Run from inside the local GPU env created by create_local_qwen3_0p6b_env.ps1
-(Unsloth + bitsandbytes + peft + CUDA torch).
+Run from a separate local GPU environment with Unsloth, bitsandbytes, peft,
+and CUDA torch installed. This helper is retained for the retired Flask
+prototype and is not part of the active Android build.
 
 Examples:
     # interactive REPL
-    .venv-qwen3-0p6b-1650\\Scripts\\python.exe infer_finetuned_parser.py
+    python infer_finetuned_parser.py
 
     # curated preset that hits eval slices not yet covered by the 100-case run
-    .venv-qwen3-0p6b-1650\\Scripts\\python.exe infer_finetuned_parser.py --preset
+    python infer_finetuned_parser.py --preset
 
     # one-shot
-    .venv-qwen3-0p6b-1650\\Scripts\\python.exe infer_finetuned_parser.py --prompt "expense: tomato 40, bus fare 18 yesterday"
+    python infer_finetuned_parser.py --prompt "expense: tomato 40, bus fare 18 yesterday"
 
     # follow-up form: pass prior structured query context as JSON
-    .venv-qwen3-0p6b-1650\\Scripts\\python.exe infer_finetuned_parser.py \\
+    python infer_finetuned_parser.py \\
         --prompt "ask: of that how much was groceries" \\
         --context "{\\"task\\":\\"parse_query\\",\\"domain\\":\\"expense\\",\\"intent\\":\\"total\\",\\"date_start\\":\\"2026-04-01\\",\\"date_end\\":\\"2026-04-30\\"}"
 """

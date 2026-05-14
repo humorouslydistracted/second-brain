@@ -15,9 +15,9 @@ generator). Produces a held-out evaluation set that:
 
 Output dir: ``eval_finetune_dataset_v3_schema_frozen/``.
 
-This file does NOT supersede ``generate_eval_dataset_v2.py`` (which targets the
-v1 schema). Both are kept so the v1 adapter can still be evaluated against the
-v1 schema if needed.
+This is the public eval generator for the current v2 parser schema. Earlier
+eval generators targeted pre-v2 experiments and are intentionally kept out of
+the active public tooling path.
 
 Per ``docs/model-training.md`` Section 9, this is Phase 2 Step 6.
 """

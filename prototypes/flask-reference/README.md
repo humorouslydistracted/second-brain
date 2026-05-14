@@ -13,6 +13,7 @@ shipping target.
 - Flask screens in `templates/` and `static/`
 - Python orchestration and SQL helpers
 - MCP experiment files
+- historical fine-tuned parser runtime helpers
 - early Jupyter notebooks under `notebooks/`
 - regression tests under `tests/`
 
@@ -27,3 +28,7 @@ python app.py
 
 The local SQLite database is ignored by Git and can be regenerated from
 `seed.sql` or the notebooks.
+
+Fine-tuned parser adapters are not committed. If you run the retired parser
+runtime, point `SECOND_BRAIN_FINETUNED_PARSER_ADAPTER` at a local adapter
+folder.

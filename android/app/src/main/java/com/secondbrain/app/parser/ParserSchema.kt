@@ -5,7 +5,7 @@ import org.json.JSONObject
 
 /**
  * Frozen v2 parser schema (mirrors `generate_large_schema_frozen_dataset_v2.py`
- * and `second_brain_finetuned_parser.py::validate_parser_payload`).
+ * and `prototypes/flask-reference/second_brain_finetuned_parser.py::validate_parser_payload`).
  *
  * Two payload families:
  *   - WRITE  → task = "parse_write",  lane = expense | buy | todo | weight | ledger

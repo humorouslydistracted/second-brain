@@ -1,57 +1,49 @@
 # =========================
-# Qwen3-0.6B v2 parser fine-tune (Kaggle) — single .py
+# Unsloth Qwen3-0.6B SFT — single Colab cell (smaller-model variant)
 #
-# .py mirror of `kaggle_finetune_qwen3_0p6b.ipynb`. Same logic, no notebook
-# cell metadata. Use this if you'd rather paste the whole script into one
-# Kaggle code cell, or run it from a terminal-style cell. The notebook
-# version stays the canonical Kaggle UX (one cell per stage, easier to
-# rerun individually).
+# This is the 0.6B sibling of `finetune_qwen3_1p7b.py`. The 1.7B path is the
+# production one; this script exists so we can A/B reliability + on-device
+# latency against the smaller model without disturbing the locked 1.7B
+# pipeline. Everything here mirrors `finetune_qwen3_1p7b.py` except:
 #
-# 0.6B sibling of `kaggle_finetune.ipynb` (the production 1.7B path).
-# Use this when you want to A/B reliability + on-device latency against
-# the smaller model.
+#   - MODEL_NAME            → unsloth/Qwen3-0.6B-unsloth-bnb-4bit
+#   - LORA_R                → 8  (16 over-fits 0.6B on this dataset size)
+#   - OUTPUT_DIR            → …/unsloth_qwen3_0p6b_parser_run
 #
-# Mirrors the patched `colab_finetune.py` (2026-05-09 trainer fixes baked
-# in: `train_on_responses_only`, `packing=False`, `MAX_SEQ_LENGTH=1536`).
-# Differences vs the 1.7B Kaggle notebook:
-#
-#   - MODEL_NAME → unsloth/Qwen3-0.6B-unsloth-bnb-4bit
-#   - LORA_R     → 8 (16 over-fits 0.6B on this dataset size)
-#   - OUTPUT_DIR → /kaggle/working/unsloth_qwen3_0p6b_parser_run
-#
-# ---------- Prerequisites ----------
-# 1. Upload `synthetic_finetune_dataset_v4_v2_schema/` as a Kaggle dataset.
-#    Note the slug — it becomes part of the input path /kaggle/input/<slug>/.
-# 2. Add the dataset to this notebook (Right sidebar → "+ Add Data").
-# 3. Pick a GPU accelerator (T4 x2 or P100, 16 GB, free tier).
-# 4. Enable Internet (Settings → Internet → On). Required for `pip install unsloth`.
-# 5. (Optional) HF_TOKEN secret. Add-ons → Secrets → New Secret named `HF_TOKEN`.
-#    Not required for Qwen3-0.6B (public).
+# The prompt template, completion-only-loss masking, packing=False, MAX_SEQ
+# bump to 1536, anchor-date Today: injection, and dataset loader are all
+# unchanged so the trained adapter remains drop-in compatible with the
+# existing GGUF conversion + Android runtime (after the matching
+# `convert_gguf_qwen3_0p6b.ipynb` run).
 # =========================
 
-# ---------- CONFIG (edit these for your setup) ----------
-DATASET_ROOT = "/kaggle/input/synthetic-finetune-v4-v2-schema/synthetic_finetune_dataset_v4_v2_schema"
-
-# /kaggle/working/ persists for the session and is what "Output" in the sidebar shows.
-OUTPUT_DIR = "/kaggle/working/unsloth_qwen3_0p6b_parser_run"
+# ---------- CONFIG ----------
+DATASET_ROOT = "/content/drive/MyDrive/notes_app_finetuning/synthetic_finetune_dataset_v4_v2_schema"   # CHANGE THIS
+OUTPUT_DIR   = "/content/drive/MyDrive/notes_app_finetuning/unsloth_qwen3_0p6b_parser_run"             # CHANGE IF YOU WANT
 
 MODEL_NAME = "unsloth/Qwen3-0.6B-unsloth-bnb-4bit"   # 0.6B variant (this script)
-# MODEL_NAME = "unsloth/Qwen3-1.7B-bnb-4bit"          # production 1.7B — use kaggle_finetune.ipynb instead
+# MODEL_NAME = "unsloth/Qwen3-1.7B-bnb-4bit"          # production 1.7B - use finetune_qwen3_1p7b.py instead
 
-HF_TOKEN = None  # set explicitly or wire from Kaggle Secrets below
+MOUNT_DRIVE = False
+HF_TOKEN = None   # put your HF token string here only if needed
 
 MAX_SEQ_LENGTH = 1536  # 2026-05-09: bumped from 1024 to fit 12-item buy/expense
-                       # multi-record JSON outputs (each record ~70 tokens).
+                       # multi-record JSON output (each record ~70 tokens, plus
+                       # ~150 for system+user). 1024 truncated past ~13 records.
 NUM_TRAIN_EPOCHS = 1
 LEARNING_RATE = 2e-4
 PER_DEVICE_BATCH_SIZE = 8
 GRADIENT_ACCUMULATION_STEPS = 2
-LORA_R = 8             # 0.6B: smaller LoRA. r=16 over-fits this base on 60k rows.
+LORA_R = 8             # 0.6B: smaller LoRA. r=16 over-fits this base on the
+                       # 60k-row v4 dataset; the existing local 0.6B script
+                       # smaller-model runs settled on r=8.
 SEED = 3407
-SAVE_MERGED_16BIT = False     # set True if you want a merged 16-bit copy under /kaggle/working/
-TRAIN_ON_ALL_SAMPLES = True   # False → 80/10/10 split
-ENABLE_PACKING = False  # 2026-05-09: packing without completion-only loss masking
-                        # leaks gradient across example boundaries.
+SAVE_MERGED_16BIT = False
+TRAIN_ON_ALL_SAMPLES = True
+ENABLE_PACKING = False  # 2026-05-09: turned off — packing without completion-only loss
+                        # masking leaks gradient across example boundaries. With
+                        # train_on_responses_only below the model now learns the
+                        # JSON output specifically, not generic chat-template tokens.
 
 SYSTEM_PROMPT = """You are a parser for a tag-first personal data app.
 Return JSON only.
@@ -60,12 +52,6 @@ Do not add explanations.
 Do not add extra keys.
 Use null for missing values.
 Follow the schema shown by the examples exactly."""
-
-TRAINING_SUBDIRS = ("parse_write", "parse_query", "parse_followup_query")
-
-# Optional: pull HF_TOKEN from Kaggle Secrets instead of pasting in plain text.
-# from kaggle_secrets import UserSecretsClient
-# HF_TOKEN = UserSecretsClient().get_secret("HF_TOKEN")
 
 
 def build_system_prompt(anchor_date):
@@ -82,33 +68,13 @@ def build_system_prompt(anchor_date):
     return SYSTEM_PROMPT
 
 
-# ---------- GPU PIN ----------
-# Pin to a single GPU. Kaggle's "T4 x2" accelerator exposes both GPUs to
-# the kernel, and accelerate/transformers can silently shard the model
-# across them via `device_map="auto"`. Unsloth's 4-bit path doesn't
-# benefit from that on a 0.6B/1.7B model and the cross-device traffic
-# slows training; worse, it occasionally OOMs the second GPU mid-epoch
-# because the LoRA optimizer state is uneven.
-#
-# Setting CUDA_VISIBLE_DEVICES="0" BEFORE importing torch hides device 1
-# from the runtime entirely, so every subsequent .to("cuda") and the
-# trainer's bf16/fp16 path land on a single device.
-#
-# Override by changing the value (e.g. "1" to use the second T4) or by
-# setting the env var before invoking the script.
-import os
-os.environ.setdefault("CUDA_VISIBLE_DEVICES", "0")
-print(f"GPU pin: CUDA_VISIBLE_DEVICES={os.environ['CUDA_VISIBLE_DEVICES']}")
-
+TRAINING_SUBDIRS = ("parse_write", "parse_query", "parse_followup_query")
 
 # ---------- INSTALL ----------
-import sys
-import subprocess
-
+import sys, subprocess, os
 
 def pip_install(*packages):
     subprocess.check_call([sys.executable, "-m", "pip", "install", "-q", "--upgrade", *packages])
-
 
 pip_install(
     "unsloth",
@@ -118,27 +84,35 @@ pip_install(
     "transformers",
     "accelerate",
     "peft",
-    "bitsandbytes",
+    "bitsandbytes"
 )
 
+# ---------- MOUNT DRIVE ----------
+if MOUNT_DRIVE:
+    if os.path.exists("/content/drive/MyDrive"):
+        print("Google Drive already available. Skipping drive.mount().")
+    else:
+        try:
+            from google.colab import drive
+            drive.mount("/content/drive")
+        except Exception as exc:
+            raise RuntimeError(
+                "Could not mount Google Drive from inside this Python script. "
+                "In Colab, mount Drive in a notebook cell first, then rerun this script "
+                "with MOUNT_DRIVE = False."
+            ) from exc
 
-# ---------- IMPORTS + GPU info ----------
+# ---------- IMPORTS ----------
 import json
 import random
 from pathlib import Path
 
-import unsloth  # noqa: F401  -- import before torch on some Kaggle envs
 import torch
 from datasets import Dataset
 from unsloth import FastLanguageModel
 from trl import SFTTrainer, SFTConfig
 
 random.seed(SEED)
-print(f"torch {torch.__version__}  cuda available: {torch.cuda.is_available()}")
-if torch.cuda.is_available():
-    print(f"GPU: {torch.cuda.get_device_name(0)}")
-    print(f"VRAM total: {torch.cuda.get_device_properties(0).total_memory / 1024**3:.1f} GB")
-
 
 # ---------- HELPERS ----------
 def discover_training_files(dataset_root: Path):
@@ -165,19 +139,23 @@ def load_raw_examples(dataset_root):
     skipped_rows = 0
     for path in files:
         with path.open("r", encoding="utf-8") as f:
-            for line in f:
+            for line_no, line in enumerate(f, start=1):
                 line = line.strip()
                 if not line:
                     continue
                 row = json.loads(line)
+
                 if "input" not in row or "output" not in row:
                     skipped_rows += 1
                     continue
 
                 user_text = row["input"].strip()
+
                 if "context" in row:
                     context_text = json.dumps(
-                        row["context"], ensure_ascii=False, separators=(",", ":"),
+                        row["context"],
+                        ensure_ascii=False,
+                        separators=(",", ":")
                     )
                     user_text = (
                         "Previous structured query context:\n"
@@ -187,7 +165,9 @@ def load_raw_examples(dataset_root):
                     )
 
                 assistant_text = json.dumps(
-                    row["output"], ensure_ascii=False, separators=(",", ":"),
+                    row["output"],
+                    ensure_ascii=False,
+                    separators=(",", ":")
                 )
 
                 examples.append({
@@ -199,12 +179,13 @@ def load_raw_examples(dataset_root):
 
     if not examples:
         raise ValueError(
-            f"No training examples with input/output were found under {dataset_root}."
+            f"No training examples with input/output were found under {dataset_root}. "
+            "Point DATASET_ROOT at a dataset root containing parse_write/parse_query/parse_followup_query."
         )
     if skipped_rows:
-        print(f"Skipped non-training rows: {skipped_rows}")
-    return examples
+        print(f"Skipped non-training rows (for example reference_only data): {skipped_rows}")
 
+    return examples
 
 def make_chat_text(tokenizer, user_text, assistant_text, anchor_date=None):
     messages = [
@@ -218,19 +199,24 @@ def make_chat_text(tokenizer, user_text, assistant_text, anchor_date=None):
         enable_thinking=False,
     )
 
-
 def split_dataset(items, seed=3407):
     rng = random.Random(seed)
     items = list(items)
     rng.shuffle(items)
+
     n = len(items)
     n_test = max(1, int(n * 0.1))
     n_valid = max(1, int(n * 0.1))
     n_train = n - n_valid - n_test
-    if n_train < 1:
-        raise ValueError("Dataset is too small after splitting.")
-    return items[:n_train], items[n_train:n_train + n_valid], items[n_train + n_valid:]
 
+    if n_train < 1:
+        raise ValueError("Dataset is too small after splitting. Add more examples.")
+
+    train_items = items[:n_train]
+    valid_items = items[n_train:n_train + n_valid]
+    test_items = items[n_train + n_valid:]
+
+    return train_items, valid_items, test_items
 
 def save_jsonl(path, rows):
     path = Path(path)
@@ -246,8 +232,7 @@ def shuffle_examples(items, seed=3407):
     rng.shuffle(items)
     return items
 
-
-# ---------- LOAD MODEL + LORA ----------
+# ---------- LOAD MODEL ----------
 model, tokenizer = FastLanguageModel.from_pretrained(
     model_name=MODEL_NAME,
     max_seq_length=MAX_SEQ_LENGTH,
@@ -273,8 +258,7 @@ model = FastLanguageModel.get_peft_model(
     loftq_config=None,
 )
 
-
-# ---------- LOAD + FORMAT DATA ----------
+# ---------- LOAD + CONVERT DATA ----------
 raw_examples = load_raw_examples(DATASET_ROOT)
 raw_examples = shuffle_examples(raw_examples, seed=SEED)
 print(f"Loaded raw examples: {len(raw_examples)} (globally shuffled across lanes/files)")
@@ -301,7 +285,8 @@ print(f"Rows carrying anchor_date (v2 schema): {anchor_count}/{len(raw_examples)
 converted_dir = Path(OUTPUT_DIR) / "converted_dataset"
 if TRAIN_ON_ALL_SAMPLES:
     train_rows = list(formatted)
-    valid_rows, test_rows = [], []
+    valid_rows = []
+    test_rows = []
     print("Training on all formatted examples. No internal split.")
     print(f"Train: {len(train_rows)}")
     save_jsonl(converted_dir / "train_all.jsonl", train_rows)
@@ -317,7 +302,6 @@ else:
     save_jsonl(converted_dir / "test.jsonl", test_rows)
     train_dataset = Dataset.from_list(train_rows)
     valid_dataset = Dataset.from_list(valid_rows)
-
 
 # ---------- TRAIN ----------
 supports_bf16 = torch.cuda.is_available() and getattr(torch.cuda, "is_bf16_supported", lambda: False)()
@@ -353,7 +337,9 @@ trainer = SFTTrainer(
 # loss across the FULL chat template (system + user + assistant), so the JSON
 # output gets only ~10-15% of the gradient signal. Result: model drifts off the
 # trained `records:[]` schema and emits whatever pre-training pattern is
-# strongest (`data:{}`).
+# strongest (`data:{}`). With train_on_responses_only, loss is masked for
+# everything before the assistant marker — every gradient update is on the
+# JSON output we actually want the model to learn.
 from unsloth.chat_templates import train_on_responses_only
 
 trainer = train_on_responses_only(
@@ -365,13 +351,13 @@ trainer = train_on_responses_only(
 trainer_stats = trainer.train()
 print(trainer_stats)
 
-
-# ---------- SAVE ADAPTER ----------
+# ---------- SAVE ----------
 adapter_dir = Path(OUTPUT_DIR) / "lora_adapter"
 adapter_dir.mkdir(parents=True, exist_ok=True)
+
 model.save_pretrained(str(adapter_dir))
 tokenizer.save_pretrained(str(adapter_dir))
-print(f"Saved LoRA adapter (peft format) to: {adapter_dir}")
+print(f"Saved LoRA adapter to: {adapter_dir}")
 
 adapter_merged_dir = Path(OUTPUT_DIR) / "lora_adapter_unsloth"
 adapter_merged_dir.mkdir(parents=True, exist_ok=True)
@@ -384,15 +370,8 @@ if SAVE_MERGED_16BIT:
     model.save_pretrained_merged(str(merged_dir), tokenizer, save_method="merged_16bit")
     print(f"Saved merged 16-bit model to: {merged_dir}")
 
-
 # ---------- QUICK INFERENCE CHECK ----------
 FastLanguageModel.for_inference(model)
-
-sanity_anchor = next((ex.get("anchor_date") for ex in raw_examples if ex.get("anchor_date")), None)
-if sanity_anchor:
-    print(f"\n=== SANITY CHECKS (Today: {sanity_anchor}) ===\n")
-else:
-    print("\n=== SANITY CHECKS ===\n")
 
 sanity_prompts = [
     "expense: kothamalli 40, bus fare 18 yesterday",
@@ -403,6 +382,11 @@ sanity_prompts = [
     "User input:\nask: of that how much was transport",
 ]
 
+sanity_anchor = next((ex.get("anchor_date") for ex in raw_examples if ex.get("anchor_date")), None)
+if sanity_anchor:
+    print(f"\n=== SANITY CHECKS (Today: {sanity_anchor}) ===\n")
+else:
+    print("\n=== SANITY CHECKS ===\n")
 for prompt in sanity_prompts:
     messages = [
         {"role": "system", "content": build_system_prompt(sanity_anchor)},

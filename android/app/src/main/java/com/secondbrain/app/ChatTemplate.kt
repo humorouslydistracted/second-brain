@@ -5,7 +5,7 @@ import java.time.LocalDate
 /**
  * Builds the prompt string that the fine-tuned Qwen3-1.7B parser expects.
  *
- * Mirrors `second_brain_finetuned_parser.py` exactly:
+ * Mirrors `prototypes/flask-reference/second_brain_finetuned_parser.py` exactly:
  *   - Same SYSTEM_PROMPT text
  *   - Same `Today: <YYYY-MM-DD>` injection (the v2 training contract)
  *   - Qwen3 chat template with `enable_thinking=False`
