@@ -19,7 +19,7 @@ This file does NOT supersede ``generate_eval_dataset_v2.py`` (which targets the
 v1 schema). Both are kept so the v1 adapter can still be evaluated against the
 v1 schema if needed.
 
-Per ``dataset_v2_plan.md`` Section 9, this is Phase 2 Step 6.
+Per ``docs/model-training.md`` Section 9, this is Phase 2 Step 6.
 """
 
 from __future__ import annotations
@@ -326,7 +326,7 @@ Tasks covered:
   clarify_options + reason_code in addition to intent / dates / filters)
 - ``parse_followup_query`` -> v2 uniform output + ``inherit_context: true``
 
-Anchors (per dataset_v2_plan.md Section 7.1, day-of-month randomized per row):
+Anchors (per docs/model-training.md Section 7.1, day-of-month randomized per row):
   2026-01-XX, 2026-03-XX, 2026-05-XX, 2026-08-XX, 2026-11-XX
 
 Size:

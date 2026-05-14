@@ -13,10 +13,10 @@ android {
         applicationId = "com.secondbrain.app"
         minSdk = 26
         targetSdk = 34
-        versionCode = 1
-        versionName = "0.1.0-phase2"
+        versionCode = 2
+        versionName = "0.2.0"
 
-        // arm64 only — Pixel 7 is arm64. Keeps APK lean (~10 MB native code).
+        // Arm64 only. Keeps APK lean while targeting modern Android phones.
         ndk {
             abiFilters += "arm64-v8a"
         }
@@ -35,7 +35,7 @@ android {
                     "-DLLAMA_BUILD_EXAMPLES=OFF",
                     "-DLLAMA_BUILD_SERVER=OFF",
                     "-DLLAMA_CURL=OFF",
-                    // ⚠ CRITICAL ⚠ — without this the inference path
+                    // Critical: without this the inference path
                     // is unusably slow. AGP's debug variant passes
                     // CMAKE_BUILD_TYPE=Debug to CMake, which compiles
                     // llama.cpp/ggml at -O0 with assert()s on every

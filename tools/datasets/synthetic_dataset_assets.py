@@ -3,7 +3,7 @@
 # v2 notes:
 # - INDIA_LEDGER_REASONS / GLOBAL_LEDGER_REASONS are retained here for the v1
 #   generator. The v2 generator does not import them: ledger writes in v2 always
-#   emit `note: null` (see dataset_v2_plan.md §1 / finetuning_data_sanity.md
+#   emit `note: null` (see docs/model-training.md §1 / docs/model-training.md
 #   "v2 - Ledger reason note").
 # - The Tanglish single-date / range keys flagged below are Pattern C in v2 and
 #   are excluded from query generation. They appear only inside todo-write

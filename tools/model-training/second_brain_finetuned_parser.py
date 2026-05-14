@@ -43,7 +43,7 @@ Follow the schema shown by the examples exactly."""
 def build_system_prompt(today_iso: str | None) -> str:
     """Return the system prompt, optionally with a `Today: <YYYY-MM-DD>` line.
 
-    v2 training (per dataset_v2_plan.md Section 7) appends a `Today:` line to
+    v2 training (per docs/model-training.md Section 7) appends a `Today:` line to
     the system prompt and trains the model to use that date as the relative-
     date anchor. At runtime we inject the live current date instead. When
     `today_iso` is None the framing stays byte-identical to the v1 training

@@ -1,28 +1,17 @@
 # =========================
-# Unsloth Qwen3-0.6B SFT — single Colab cell (smaller-model variant)
-#
-# This is the 0.6B sibling of `colab_finetune.py`. The 1.7B path is the
-# production one; this script exists so we can A/B reliability + on-device
-# latency against the smaller model without disturbing the locked 1.7B
-# pipeline. Everything here mirrors `colab_finetune.py` except:
-#
-#   - MODEL_NAME            → unsloth/Qwen3-0.6B-unsloth-bnb-4bit
-#   - LORA_R                → 8  (16 over-fits 0.6B on this dataset size)
-#   - OUTPUT_DIR            → …/unsloth_qwen3_0p6b_parser_run
-#
-# The prompt template, completion-only-loss masking, packing=False, MAX_SEQ
-# bump to 1536, anchor-date Today: injection, and dataset loader are all
-# unchanged so the trained adapter remains drop-in compatible with the
-# existing GGUF conversion + Android runtime (after the matching
-# colab_convert_to_gguf_qwen3_0p6b.ipynb run).
+# Unsloth Qwen3 SFT - single Colab cell
+# Trains directly from our current training dataset format:
+#   {"input": "...", "output": {...}}
+#   {"context": {...}, "input": "...", "output": {...}}
+# It will ignore `reference_only/` rows such as deterministic `note:` save references.
 # =========================
 
 # ---------- CONFIG ----------
 DATASET_ROOT = "/content/drive/MyDrive/notes_app_finetuning/synthetic_finetune_dataset_v4_v2_schema"   # CHANGE THIS
-OUTPUT_DIR   = "/content/drive/MyDrive/notes_app_finetuning/unsloth_qwen3_0p6b_parser_run"             # CHANGE IF YOU WANT
+OUTPUT_DIR   = "/content/drive/MyDrive/notes_app_finetuning/unsloth_qwen3_parser_run"     # CHANGE IF YOU WANT
 
-MODEL_NAME = "unsloth/Qwen3-0.6B-unsloth-bnb-4bit"   # 0.6B variant (this script)
-# MODEL_NAME = "unsloth/Qwen3-1.7B-bnb-4bit"          # production 1.7B — use colab_finetune.py instead
+MODEL_NAME = "unsloth/Qwen3-1.7B-bnb-4bit"           # recommended real run
+# MODEL_NAME = "unsloth/Qwen3-0.6B-unsloth-bnb-4bit" # smaller dry run
 
 MOUNT_DRIVE = False
 HF_TOKEN = None   # put your HF token string here only if needed
@@ -34,9 +23,7 @@ NUM_TRAIN_EPOCHS = 1
 LEARNING_RATE = 2e-4
 PER_DEVICE_BATCH_SIZE = 8
 GRADIENT_ACCUMULATION_STEPS = 2
-LORA_R = 8             # 0.6B: smaller LoRA. r=16 over-fits this base on the
-                       # 60k-row v4 dataset; the existing local 0.6B script
-                       # (local_finetune_qwen3_0p6b_gtx1650.py) settled on r=8.
+LORA_R = 16
 SEED = 3407
 SAVE_MERGED_16BIT = False
 TRAIN_ON_ALL_SAMPLES = True
@@ -57,7 +44,7 @@ Follow the schema shown by the examples exactly."""
 def build_system_prompt(anchor_date):
     """Append `Today: <YYYY-MM-DD>` to the system prompt for v2 rows.
 
-    v2 schema (per dataset_v2_plan.md Section 7) trains the model with a
+    v2 schema (per docs/model-training.md Section 7) trains the model with a
     ``Today:`` line in the system prompt and matching anchor in each row's
     relative-date resolution. v1 rows do not carry ``anchor_date`` and skip
     the line, which keeps the chat-template framing byte-identical to the

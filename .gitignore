@@ -59,7 +59,7 @@ second_brain_mcp_server.log
 *.sqlite3
 
 # ---------------------------------------------------------------------------
-# Model files and large binaries — ship via GitHub Releases instead
+# Model files and large binaries - ship via GitHub Releases instead
 # ---------------------------------------------------------------------------
 models/
 *.gguf
@@ -70,6 +70,9 @@ models/
 *.pkl
 *.pt
 *.pth
+eval_manual*.json
+predictions*.jsonl
+summary*.json
 
 # ---------------------------------------------------------------------------
 # Fine-tune snapshots and adapter outputs
@@ -91,7 +94,7 @@ eval_finetune_dataset_*/
 synthetic_dataset_assets_copy.py
 
 # ---------------------------------------------------------------------------
-# APK / AAB — ship via GitHub Releases instead
+# APK / AAB - ship via GitHub Releases instead
 # ---------------------------------------------------------------------------
 *.apk
 *.aab

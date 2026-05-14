@@ -1,14 +1,14 @@
 """
 v2 dataset generator for the tag-first parser fine-tune.
 
-Source of truth: dataset_v2_plan.md.
-Schema reference: finetuning_data_sanity.md - "Shared Schema Freeze v2".
-Diversity rules: dataset_india_context_rulebook.md - "v2 Amendments".
+Source of truth: docs/model-training.md.
+Schema reference: docs/model-training.md - "Shared Schema Freeze v2".
+Diversity rules: docs/model-training.md - "v2 Amendments".
 
 Differences from generate_large_schema_frozen_dataset.py (v1):
 - Multi-anchor: every row carries a top-level "anchor_date"; relative date
   phrases resolve relative to that row's anchor.
-- Harmonized intent vocabulary per dataset_v2_plan.md Section 1.3.
+- Harmonized intent vocabulary per docs/model-training.md Section 1.3.
 - New parse_query dispositions: accept | clarify | reject.
 - Per-lane x per-pattern Tanglish gating (Pattern A/B/C). Pattern C is 0%
   everywhere. Tanglish date phrases (innaiku, indha maasam, ...) are excluded
@@ -51,7 +51,7 @@ from synthetic_dataset_assets import (
 )
 
 
-# Per dataset_v2_plan.md Section 7.1, refined in the v2 review session.
+# Per docs/model-training.md Section 7.1, refined in the v2 review session.
 #
 # Anchors are 5 (year, month) pairs spread across 2026. Day-of-month is
 # randomized PER ROW (uniform within the actual length of the chosen month).
@@ -84,7 +84,7 @@ REFERENCE_COUNT = 0
 
 UNIQUENESS_POLICY = "soft"
 
-# Adversarial / specialty slice counts per dataset_v2_plan.md Section 5.
+# Adversarial / specialty slice counts per docs/model-training.md Section 5.
 ADVERSARIAL_PAIR_COUNT = 400       # produces 800 rows
 ACTION_CLARIFY_COUNT = 300   # ledger
 MULTI_PERSON_REJECT_COUNT = 300    # weight
@@ -162,7 +162,7 @@ def _india_fiscal_quarter(d: date) -> tuple[date, date]:
 def compute_options_for_anchor(anchor_iso: str) -> dict:
     """Build the (single, range, todo_write_extra, absolute_dates) lookup for
     one anchor. Used both for date-phrase generation and for the per-anchor
-    random-key pool described in dataset_v2_plan.md Section 7.3."""
+    random-key pool described in docs/model-training.md Section 7.3."""
     a = _parse_iso(anchor_iso)
     single: dict[str, str] = {}
     range_: dict[str, tuple[str, str]] = {}
@@ -436,7 +436,7 @@ def anchor_year_to_date(anchor: str) -> tuple[str, str]:
 # ---------------------------------------------------------------------------
 # parse_query disposition shape builders
 #
-# Per finetuning_data_sanity.md "Shared Schema Freeze v2", every parse_query
+# Per docs/model-training.md "Shared Schema Freeze v2", every parse_query
 # row carries a uniform field set across dispositions: disposition,
 # reason_code, clarify_reason, clarify_options. Accept rows fill intent /
 # date_start / date_end / filters / limit / query_text; clarify and reject
@@ -560,7 +560,7 @@ def parse_followup_query_accept(
 
 
 # ---------------------------------------------------------------------------
-# Form-distribution weights per dataset_v2_plan.md Section 3.1.
+# Form-distribution weights per docs/model-training.md Section 3.1.
 # Each entry: form -> percentage. Scoped percentage is tracked separately.
 # Within a scoped row, the form distribution is the same as unscoped.
 # ---------------------------------------------------------------------------
@@ -637,7 +637,7 @@ def weighted_choice(weights: dict[str, float], rng: random.Random) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Per-pattern Tanglish gating per dataset_v2_plan.md Section 2.
+# Per-pattern Tanglish gating per docs/model-training.md Section 2.
 # ---------------------------------------------------------------------------
 
 # Pattern A (Tamil noun in English frame) shares per lane.
@@ -1272,7 +1272,7 @@ def _is_absolute_date_key(key: str) -> bool:
 
 
 # ---------------------------------------------------------------------------
-# Reject pools (per dataset_v2_plan.md Section 6)
+# Reject pools (per docs/model-training.md Section 6)
 # ---------------------------------------------------------------------------
 
 # Buy "incomplete" lane: time / quantity / pronoun fragments only
@@ -1373,7 +1373,7 @@ BUY_TRIPLE_PATTERNS = [
     "grab {first}, {second}, {third}",
 ]
 # v2 review fix: Pattern B/C entries dropped (`vaanganum`, `vangikanum`,
-# `kooda...yum`). Per dataset_v2_plan.md §2, buy write Pattern B/C share is 0%.
+# `kooda...yum`). Per docs/model-training.md §2, buy write Pattern B/C share is 0%.
 # Pattern A in buy writes still flows through item names (Tamil grocery
 # words like `vengayam`, `kothamalli`, `murukku` come straight from
 # INDIA_BUY without verb wrappers).
@@ -1413,7 +1413,7 @@ def render_todo_pattern_b(anchor: str, rng: random.Random) -> tuple[str, str]:
     """Compose a Pattern B todo-write phrase.
 
     Returns (input_text, resolved_date). The phrase may include a Tanglish
-    time prefix (`naalaiku`, `innaiku`) per dataset_v2_plan.md Section 2.
+    time prefix (`naalaiku`, `innaiku`) per docs/model-training.md Section 2.
     """
     obj = rng.choice(TODO_PATTERN_B_OBJECTS)
     verb = rng.choice(TODO_PATTERN_B_VERBS)
@@ -2149,7 +2149,7 @@ def make_ledger_write(anchor: str, mode: str, rng: random.Random) -> dict:
 # ---------------------------------------------------------------------------
 # parse_query date-phrase routing
 #
-# Per dataset_v2_plan.md Section 7.3:
+# Per docs/model-training.md Section 7.3:
 #   60% canonical phrasings (today / this month / last month / ...)
 #   30% random named-relative key from the pool
 #   10% absolute calendar dates / ranges
@@ -2460,7 +2460,7 @@ def maybe_typo(text: str, rng: random.Random, rate: float = SEARCH_TYPO_RATE) ->
 # ---------------------------------------------------------------------------
 # §5.2 bare-nameless template pools
 #
-# Per dataset_v2_plan.md Section 5.2, applicable forms drop the `my`/`en`
+# Per docs/model-training.md Section 5.2, applicable forms drop the `my`/`en`
 # possessive at ~10% rate. For weight/ledger the filter still maps to
 # `person_text: "self"` (weight) or null (ledger); for expense/todo/buy
 # bare-nameless rows keep the same filters as the named version.
@@ -2543,7 +2543,7 @@ MULTI_PERSON_COMPARE_TEMPLATES = [
 # ---------------------------------------------------------------------------
 # Template pools (Section 4)
 #
-# Per dataset_v2_plan.md Section 4.3: high-frequency intents (total, list,
+# Per docs/model-training.md Section 4.3: high-frequency intents (total, list,
 # latest, summary, balance) target 15 templates; low-frequency intents
 # (compare, change, exclude, history) target 8-10. Within a form the styles
 # are split roughly 35% noun / 30% verb / 20% question / 15% Pattern A.
@@ -3939,7 +3939,7 @@ def make_adversarial_pair(anchor: str, mode: str, rng: random.Random) -> list[di
 # user's next utterance as `input`. The output is a parse_followup_query
 # with `inherit_context: true` and v2 intents only.
 #
-# Per dataset_v2_plan.md Section 1.2, parse_followup_query allows only the
+# Per docs/model-training.md Section 1.2, parse_followup_query allows only the
 # `accept` disposition. Followups inherit from accept-shape contexts; if
 # the base maker returns a reject/clarify row, retry until accept.
 # ---------------------------------------------------------------------------
@@ -4677,7 +4677,7 @@ def generate_dataset(
         parse_query/adversarial.jsonl
         parse_followup_query/mixed_followups.jsonl
 
-    Per dataset_v2_plan.md, the v2 layout omits reference_only/. The
+    Per docs/model-training.md, the v2 layout omits reference_only/. The
     deterministic note-write bypass stays out of SFT and does not need
     synthetic rows.
 
@@ -4743,9 +4743,9 @@ def generate_dataset(
 Generated by `generate_large_schema_frozen_dataset_v2.py`.
 
 Source rules:
-- `dataset_v2_plan.md` (canonical)
-- `finetuning_data_sanity.md` -> "Shared Schema Freeze v2"
-- `dataset_india_context_rulebook.md` -> "v2 Amendments"
+- `docs/model-training.md` (canonical)
+- `docs/model-training.md` -> "Shared Schema Freeze v2"
+- `docs/model-training.md` -> "v2 Amendments"
 
 Anchors (multi-anchor per Section 7.1):
 - {", ".join(ANCHORS)}
