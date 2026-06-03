@@ -7,6 +7,14 @@ then query them conversationally without sending data to a server.
 
 The current product surface is the native Android app in `android/`.
 
+<p align="center">
+<a href="screenshots/second_brain_home.png"><img src="screenshots/second_brain_home.png" height="384" alt="Home dashboard with recent activity"/></a>
+<a href="screenshots/second_brain_expense_natural_language.png"><img src="screenshots/second_brain_expense_natural_language.png" height="384" alt="Natural language expense capture"/></a>
+<a href="screenshots/second_brain_todo.png"><img src="screenshots/second_brain_todo.png" height="384" alt="Todo capture from home"/></a>
+<a href="screenshots/second_brain_activity_log.png"><img src="screenshots/second_brain_activity_log.png" height="384" alt="Activity log with parser and query history"/></a>
+<a href="screenshots/second_brain_settings.png"><img src="screenshots/second_brain_settings.png" height="384" alt="Parser and embedder model settings"/></a>
+</p>
+
 ## Why It Exists
 
 Most note apps store text but do not understand it. Second Brain keeps the text
